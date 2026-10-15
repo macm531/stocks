@@ -1,0 +1,76 @@
+"""ETF scan: fetches fund data for a curated list of major US-listed equity ETFs.
+
+Writes docs/etfs.json. Metrics (raw; the page applies thresholds):
+  er    net expense ratio, %          aum   total assets, $
+  pe    trailing P/E of holdings      r5    5-year average annual return
+  r3    3-year average annual return  yld   distribution yield
+  beta  3-year beta                   lo52/hi52/px  52-week range and last close
+"""
+import json
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from pathlib import Path
+
+import yfinance as yf
+
+from ranges import price_ranges
+
+OUT = Path(__file__).parent / "docs" / "etfs.json"
+
+ETFS = {
+    "Broad market": "SPY IVV VOO VTI ITOT SCHB SCHX VV IWB SPLG RSP QQQ QQQM DIA IWM IJH IJR MDY VB VO VXF",
+    "Value & dividend": "VTV IWD SCHD VYM DVY SDY NOBL DGRO VIG HDV SPYD SPHD VLUE RPV IVE SPYV IUSV MGV SCHV VBR VOE IWN IWS COWZ CALF AVUV AVLV DFSV FNDX FNDA PRF DGRW VFLO",
+    "Quality & low vol": "QUAL SPHQ USMV SPLV QUS JEPI JEPQ",
+    "Growth & momentum": "MTUM IWF VUG SCHG RPG IVW SPYG IUSG MGK",
+    "Sector": "XLK XLF XLE XLV XLI XLY XLP XLU XLB XLRE XLC VGT VFH VDE VHT VIS VCR VDC VPU VAW VNQ VOX SMH SOXX IGV IBB XBI KRE KBE ITB XHB XOP OIH GDX XME",
+    "International": "VEA VWO IEFA IEMG EFA EEM VXUS IXUS SCHF ACWI VT EFV IDV VYMI DLS FNDF AVDV EWJ EWZ INDA FXI MCHI EWG EWU EWC EWT EWY",
+    "Thematic": "ARKK ICLN TAN LIT BOTZ CIBR HACK PAVE",
+}
+
+
+def num(x):
+    try:
+        x = float(x)
+        return None if x != x else x
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch(sym, group, tries=3):
+    for attempt in range(tries):
+        try:
+            i = yf.Ticker(sym).info or {}
+            if i.get("quoteType") != "ETF":
+                return None
+            return {
+                "t": sym, "n": i.get("longName") or i.get("shortName") or sym, "grp": group,
+                "cat": i.get("category") or "", "fam": i.get("fundFamily") or "",
+                "er": num(i.get("netExpenseRatio") or i.get("annualReportExpenseRatio")),
+                "aum": num(i.get("totalAssets")), "pe": num(i.get("trailingPE")),
+                "r5": num(i.get("fiveYearAverageReturn")), "r3": num(i.get("threeYearAverageReturn")),
+                "yld": num(i.get("yield")), "beta": num(i.get("beta3Year")),
+                "ytd": num(i.get("ytdReturn")),
+            }
+        except Exception:
+            time.sleep(2 * (attempt + 1))
+    return None
+
+
+def main():
+    pairs = [(s, g) for g, syms in ETFS.items() for s in syms.split()]
+    with ThreadPoolExecutor(4) as ex:
+        rows = [r for r in ex.map(lambda p: fetch(*p), pairs) if r]
+    rng = price_ranges([r["t"] for r in rows])
+    for r in rows:
+        r.update({k: v for k, v in rng.get(r["t"], {}).items()})
+    rows.sort(key=lambda r: r["t"])
+    OUT.write_text(json.dumps({
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "universe": len(pairs), "scanned": len(rows), "rows": rows,
+    }, separators=(",", ":")))
+    print(f"etfs: {len(rows)}/{len(pairs)} -> {OUT}")
+
+
+if __name__ == "__main__":
+    main()

@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: "0 11 * * 1-5"         # fundamentals rescan, ~7am ET weekdays
+    - cron: "0 11 * * 1-5"         # stock + ETF fundamentals rescan, ~7am ET weekdays
     - cron: "*/30 13-21 * * 1-5"   # prices + 52-week-low alerts, market hours
   workflow_dispatch:
     inputs:
@@ -57,7 +57,7 @@ jobs:
 
       - name: Rescan fundamentals
         if: steps.mode.outputs.mode == 'scan'
-        run: python scan.py && python alert.py --force --prices-only
+        run: python scan.py && python etf.py && python alert.py --force --prices-only
 
       - name: Refresh prices and send alerts
         if: steps.mode.outputs.mode == 'prices'
@@ -68,7 +68,7 @@ jobs:
         run: |
           git config user.name "stock-bot"
           git config user.email "stock-bot@users.noreply.github.com"
-          for f in docs/scan.json docs/live.json alerts_state.json alerts.log; do [ -e "$f" ] && git add "$f"; done
+          for f in docs/scan.json docs/etfs.json docs/live.json alerts_state.json alerts.log; do [ -e "$f" ] && git add "$f"; done
           git diff --cached --quiet && exit 0
           git commit -m "Update data ($(date -u +%Y-%m-%dT%H:%MZ))"
           git pull --rebase -X theirs && git push

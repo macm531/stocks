@@ -54,6 +54,31 @@ def universe():
     return tickers
 
 
+BLUECHIP_LISTS = [
+    ("https://en.wikipedia.org/wiki/S%26P_100", "Symbol"),
+    ("https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average", "Symbol"),
+]
+
+
+def bluechips():
+    """S&P 100 + Dow 30 tickers."""
+    out = set()
+    for url, col in BLUECHIP_LISTS:
+        html = requests.get(url, headers=UA, timeout=30).text
+        for table in pd.read_html(io.StringIO(html)):
+            if col in [str(c) for c in table.columns] and len(table) >= 25:
+                out |= {str(x).strip().replace(".", "-") for x in table[col]}
+                break
+    return out
+
+
+def tag_bluechips(rows):
+    bc = bluechips()
+    for r in rows:
+        r["bc"] = r["t"] in bc
+    print(f"blue chips tagged: {sum(r['bc'] for r in rows)}", flush=True)
+
+
 def num(x):
     try:
         x = float(x)
@@ -199,6 +224,7 @@ def main():
 
     rows.sort(key=lambda r: r["t"])
     add_ranges(rows)
+    tag_bluechips(rows)
     meds = sector_medians(rows)
 
     # Previous scan, so the page can flag stocks that are new to the shortlist.

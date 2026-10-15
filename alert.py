@@ -1,6 +1,6 @@
 """52-week-low alerts for the scanner's shortlist.
 
-Watchlist = stocks in site/scan.json passing 4+ of the 5 tests (page defaults).
+Watchlist = names passing 4+ of the 5 tests on any site page (thresholds from docs/config.json).
 Pulls fresh daily bars, and when a stock trades within LOW_PCT of its 52-week
 low, emails ALERT_TO and posts a Mac notification. Each ticker alerts at most
 once per day (state in alerts_state.json).
@@ -38,13 +38,17 @@ LOG = ROOT / "alerts.log"
 ALERT_TO = "macm53@gmail.com"
 SMTP_USER = "macm53@gmail.com"
 KEYCHAIN_SERVICE = "stock-scanner-gmail"
-PAGE_URL = os.environ.get("SITE_URL", "https://claude.ai/artifact/LafygQsnwm5pQujw3CX6pE")
+PAGE_URL = os.environ.get("SITE_URL", "https://macm531.github.io/stocks/")
 
-LOW_PCT = 0.05      # within 5% of the 52-week low
-MIN_PASSES = 4
-T = {"peg": 1.0, "de": 0.5, "roic": 0.15, "fcf": 0.06, "pe": 15.0, "mcap": 0.3e9}
+CONFIG = json.loads((ROOT / "docs" / "config.json").read_text())  # same thresholds as the site
+LOW_PCT = CONFIG["lowPct"] / 100
+MIN_PASSES = CONFIG["minPasses"]
 EXCLUDE_SECTORS = {"Financial Services", "Real Estate"}
 ET = ZoneInfo("America/New_York")
+
+# Raw value -> threshold units, and which values count as invalid (always fail). Mirrors META in docs/app.js.
+UNIT = {"roic": 100, "fcfy": 100, "r5": 100, "yld": 100, "aum": 1e-9}
+VALID = {"peg": lambda v: v > 0, "pe": lambda v: v > 0, "de": lambda v: v >= 0}
 
 
 def log(msg):
@@ -54,29 +58,37 @@ def log(msg):
         f.write(line + "\n")
 
 
-def passes(r, medians):
-    med = medians.get(r["sec"], medians.get("_market"))
-    pe, peg, de, roic, fcfy = r.get("pe"), r.get("peg"), r.get("de"), r.get("roic"), r.get("fcfy")
-    tests = [
-        peg is not None and 0 < peg < T["peg"],
-        de is not None and 0 <= de < T["de"],
-        roic is not None and roic > T["roic"],
-        fcfy is not None and fcfy > T["fcf"],
-        pe is not None and 0 < pe < T["pe"] and (med is None or pe < med),
-    ]
-    return sum(tests)
+def passes(r, page, medians):
+    n = 0
+    for t in page["tests"]:
+        v = r.get(t["k"])
+        if v is None or not VALID.get(t["k"], lambda _: True)(v):
+            continue
+        x = v * UNIT.get(t["k"], 1)
+        ok = x < t["t"] if t["dir"] == "lt" else x > t["t"]
+        if ok and t["k"] == "pe" and page.get("sectorPE"):
+            med = medians.get(r.get("sec"), medians.get("_market"))
+            ok = med is None or v < med
+        n += ok
+    return n
 
 
 def watchlist():
-    d = json.loads(SCAN.read_text())
-    out = []
-    for r in d["rows"]:
-        if r["sec"] in EXCLUDE_SECTORS or (r.get("mc") or 0) < T["mcap"]:
-            continue
-        n = passes(r, d["medians"])
-        if n >= MIN_PASSES:
-            out.append({**r, "passes": n})
-    return out
+    """Every shortlisted name across the site's pages, tagged with the page it qualifies on."""
+    data, out = {}, {}
+    for pid, page in CONFIG["pages"].items():
+        d = data.setdefault(page["data"], json.loads((ROOT / "docs" / page["data"]).read_text()))
+        for r in d["rows"]:
+            if page["universe"] == "bc" and not r.get("bc"):
+                continue
+            if page["kind"] == "stock" and (
+                    (page.get("excludeFin") and r["sec"] in EXCLUDE_SECTORS)
+                    or (r.get("mc") or 0) < page.get("minCapB", 0) * 1e9):
+                continue
+            n = passes(r, page, d.get("medians", {}))
+            if n >= MIN_PASSES and r["t"] not in out:
+                out[r["t"]] = {**r, "passes": n, "page": page["nav"], "kind": page["kind"], "url_file": page["file"]}
+    return list(out.values())
 
 
 def market_open(now):
@@ -123,30 +135,36 @@ def pct(x):
     return "—" if x is None else f"{x * 100:.1f}%"
 
 
+def metrics_line(h):
+    if h["kind"] == "etf":
+        er = "—" if h.get("er") is None else f"{h['er']:.2f}%"
+        return f"Fee {er} · P/E {h.get('pe') or 0:.1f} · 5-yr {pct(h.get('r5'))} · Yield {pct(h.get('yld'))}"
+    return (f"PEG {h.get('peg') or 0:.2f} · D/E {h.get('de') or 0:.2f} · ROIC {pct(h.get('roic'))} · "
+            f"FCF {pct(h.get('fcfy'))} · P/E {h.get('pe') or 0:.1f}")
+
+
 def build_email(hits):
     lines, rows = [], []
     for h in hits:
-        lines.append(f"{h['t']} {h['n']}: ${h['px']:.2f}, {h['from_low'] * 100:.1f}% above 52-wk low ${h['lo52']:.2f} "
-                     f"| {h['passes']}/5 tests | PEG {h.get('peg') or 0:.2f} D/E {h.get('de') or 0:.2f} "
-                     f"ROIC {pct(h.get('roic'))} FCF {pct(h.get('fcfy'))} P/E {h.get('pe') or 0:.1f}")
+        lines.append(f"[{h['page']}] {h['t']} {h['n']}: ${h['px']:.2f}, {h['from_low'] * 100:.1f}% above 52-wk low "
+                     f"${h['lo52']:.2f} | {h['passes']}/5 tests | {metrics_line(h)}")
         rows.append(
             f"<tr><td><b><a href='https://finance.yahoo.com/quote/{escape(h['t'])}'>{escape(h['t'])}</a></b><br>"
             f"<span style='color:#5d6b7a'>{escape(h['n'])}</span></td>"
+            f"<td><a href='{PAGE_URL}{h['url_file']}'>{escape(h['page'])}</a></td>"
             f"<td>${h['px']:.2f}</td><td>${h['lo52']:.2f}</td><td><b>+{h['from_low'] * 100:.1f}%</b></td>"
-            f"<td>{h['passes']}/5</td><td>{h.get('peg') or 0:.2f}</td><td>{h.get('de') or 0:.2f}</td>"
-            f"<td>{pct(h.get('roic'))}</td><td>{pct(h.get('fcfy'))}</td><td>{h.get('pe') or 0:.1f}</td></tr>")
-    names = ", ".join(h["t"] for h in hits)
-    subject = f"52-week low alert: {names}"
-    text = "Shortlisted stocks near their 52-week low:\n\n" + "\n".join(lines) + f"\n\nFull breakdown: {PAGE_URL}\n"
+            f"<td>{h['passes']}/5</td><td style='color:#5d6b7a'>{escape(metrics_line(h))}</td></tr>")
+    subject = "52-week low alert: " + ", ".join(h["t"] for h in hits)
+    text = "Shortlisted names near their 52-week low:\n\n" + "\n".join(lines) + f"\n\nOpen the site: {PAGE_URL}\n"
     th = "".join(f"<th align='left' style='padding:6px 10px;border-bottom:1px solid #dde3ea'>{c}</th>" for c in
-                 ["Stock", "Price", "52w low", "Above low", "Tests", "PEG", "D/E", "ROIC", "FCF yld", "P/E"])
+                 ["Name", "Page", "Price", "52w low", "Above low", "Tests", "Metrics"])
     html = (f"<div style='font-family:-apple-system,Segoe UI,sans-serif;color:#15202b'>"
             f"<h2 style='margin:0 0 6px'>Buy-zone alert</h2>"
-            f"<p style='margin:0 0 14px;color:#5d6b7a'>These stocks pass {MIN_PASSES}+ of your 5 value/quality tests and trade within "
+            f"<p style='margin:0 0 14px;color:#5d6b7a'>These pass {MIN_PASSES}+ of the 5 tests on their page and trade within "
             f"{LOW_PCT * 100:.0f}% of their 52-week low.</p>"
             f"<table cellspacing='0' style='border-collapse:collapse;font-size:14px'><tr>{th}</tr>"
             + "".join(rows).replace("<td>", "<td style='padding:6px 10px;border-bottom:1px solid #eef1f4'>")
-            + f"</table><p><a href='{PAGE_URL}'>Open the scanner</a></p>"
+            + f"</table><p><a href='{PAGE_URL}'>Open the site</a></p>"
             f"<p style='color:#93a2b2;font-size:12px'>Fundamentals from the latest scan; prices from Yahoo Finance. Not investment advice.</p></div>")
     return subject, text, html
 
@@ -170,7 +188,7 @@ def main():
         return
 
     # Fresh prices + 52-week ranges for the whole universe; the site reads live.json.
-    all_t = [r["t"] for r in json.loads(SCAN.read_text())["rows"]]
+    all_t = [r["t"] for f in ("scan.json", "etfs.json") for r in json.loads((ROOT / "docs" / f).read_text())["rows"]]
     rng = price_ranges(all_t)
     LIVE.write_text(json.dumps({
         "at": datetime.now(ET).isoformat(timespec="seconds"),

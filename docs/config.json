@@ -1,0 +1,63 @@
+{
+  "lowPct": 5,
+  "minPasses": 4,
+  "pages": {
+    "value": {
+      "file": "index.html",
+      "nav": "Value screen",
+      "title": "Value Quality Scanner",
+      "eyebrow": "S&P 1500 · value + quality screen",
+      "intro": "Ranks every stock in the S&P 500, 400 and 600 on five tests: PEG, debt-to-equity, ROIC, free-cash-flow yield and P/E. Change any threshold and the board re-scores instantly.",
+      "kind": "stock",
+      "data": "scan.json",
+      "universe": "all",
+      "excludeFin": true,
+      "minCapB": 0.3,
+      "sectorPE": true,
+      "tests": [
+        {"k": "peg", "dir": "lt", "t": 1.0},
+        {"k": "de", "dir": "lt", "t": 0.5},
+        {"k": "roic", "dir": "gt", "t": 15},
+        {"k": "fcfy", "dir": "gt", "t": 6},
+        {"k": "pe", "dir": "lt", "t": 15}
+      ]
+    },
+    "bluechip": {
+      "file": "bluechips.html",
+      "nav": "Blue chips",
+      "title": "Blue Chip Board",
+      "eyebrow": "S&P 100 + Dow 30 · quality at a fair price",
+      "intro": "The largest, most established US companies, scored on the same five tests with thresholds sized for mega-caps, which rarely trade at small-cap multiples.",
+      "kind": "stock",
+      "data": "scan.json",
+      "universe": "bc",
+      "excludeFin": false,
+      "minCapB": 0,
+      "sectorPE": false,
+      "tests": [
+        {"k": "peg", "dir": "lt", "t": 2.0},
+        {"k": "de", "dir": "lt", "t": 1.0},
+        {"k": "roic", "dir": "gt", "t": 15},
+        {"k": "fcfy", "dir": "gt", "t": 4},
+        {"k": "pe", "dir": "lt", "t": 25}
+      ]
+    },
+    "etf": {
+      "file": "etfs.html",
+      "nav": "ETFs",
+      "title": "ETF Value Board",
+      "eyebrow": "139 major US-listed equity ETFs",
+      "intro": "Broad-market, value, dividend, sector and international ETFs, scored on cost, size, valuation of their holdings, long-run return and income.",
+      "kind": "etf",
+      "data": "etfs.json",
+      "universe": "all",
+      "tests": [
+        {"k": "er", "dir": "lt", "t": 0.20},
+        {"k": "aum", "dir": "gt", "t": 1},
+        {"k": "pe", "dir": "lt", "t": 22},
+        {"k": "r5", "dir": "gt", "t": 10},
+        {"k": "yld", "dir": "gt", "t": 1.5}
+      ]
+    }
+  }
+}
