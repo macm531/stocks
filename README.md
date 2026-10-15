@@ -21,3 +21,6 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 ## DCF
 Two-stage model in `docs/app.js` (`dcf`) and mirrored in `alert.py`: average of the last 3 years' free cash flow, grown at the company's own historical FCF growth (capped, default 15%) for 5 years, fading to terminal growth (2.5%) over years 6-10, discounted at 10%, plus net cash, divided by shares. Defaults in `docs/config.json` → `dcf`; adjustable on each stock page. History is the ~4 annual years Yahoo provides.
+
+## Chart shape + buy zone
+`ranges.trend_stats` fits log(weekly close) over 5 years: `r2` (steadiness, negative when falling), `cagr5`, `maxdd`, `spark` (mini chart). `config.json` → `trend` filters every page to steady uptrends (default R² ≥ 0.75, ≥ 10%/yr); `zone` picks the buy zone: `pullback` (10–30% below the 52-week high, default) or `low` (within `lowPct` of the 52-week low). Alerts use the same settings.

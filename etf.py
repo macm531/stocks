@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yfinance as yf
 
-from ranges import price_ranges
+from ranges import price_ranges, trend_stats
 
 OUT = Path(__file__).parent / "docs" / "etfs.json"
 
@@ -62,8 +62,10 @@ def main():
     with ThreadPoolExecutor(4) as ex:
         rows = [r for r in ex.map(lambda p: fetch(*p), pairs) if r]
     rng = price_ranges([r["t"] for r in rows])
+    tr = trend_stats([r["t"] for r in rows])
     for r in rows:
         r.update({k: v for k, v in rng.get(r["t"], {}).items()})
+        r.update(tr.get(r["t"], {}))
     rows.sort(key=lambda r: r["t"])
     OUT.write_text(json.dumps({
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

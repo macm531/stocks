@@ -184,3 +184,16 @@ tr.detail .dcf b { color: var(--accent); }
 .hist table { min-width: 0; width: auto; font-size: 12.5px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; border-collapse: separate; }
 .hist th, .hist td { padding: 6px 12px; border-bottom: 1px solid var(--line); }
 .hist tr:last-child td { border-bottom: 0; }
+
+/* 5-year trend sparklines */
+.spark polyline { stroke: var(--muted); }
+.spark.up polyline { stroke: var(--pass); }
+.spark-na { color: var(--muted); }
+.sparkrow { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); font-family: var(--f-data); }
+.sparkrow .spark { flex: 1 1 auto; min-width: 0; max-width: 100%; height: 40px; }
+td.trendcell { white-space: nowrap; }
+td.trendcell .spark { vertical-align: middle; }
+td.trendcell small { display: block; font-family: var(--f-data); font-size: 10.5px; color: var(--muted); }
+.zsel { font: inherit; font-size: 13.5px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+.pick .sparkrow { flex-direction: column; align-items: stretch; gap: 2px; }
+.pick .sparkrow .spark { width: 100%; height: 44px; }

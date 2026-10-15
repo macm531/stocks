@@ -26,7 +26,7 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-from ranges import price_ranges
+from ranges import price_ranges, trend_stats
 
 ROOT = Path(__file__).parent
 OUT = ROOT / "docs" / "scan.json"
@@ -242,6 +242,14 @@ def add_ranges(rows):
             r.update(lo52=g["lo52"], hi52=g["hi52"])
             r["px"] = r["px"] or g["px"]
     print(f"52-week ranges: {len(rng)}/{len(rows)}", flush=True)
+    add_trends(rows)
+
+
+def add_trends(rows):
+    tr = trend_stats([r["t"] for r in rows])
+    for r in rows:
+        r.update(tr.get(r["t"], {}))
+    print(f"5-year trends: {len(tr)}/{len(rows)}", flush=True)
 
 
 def sector_medians(rows):

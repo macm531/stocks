@@ -42,6 +42,8 @@ PAGE_URL = os.environ.get("SITE_URL", "https://macm531.github.io/stocks/")
 
 CONFIG = json.loads((ROOT / "docs" / "config.json").read_text())  # same thresholds as the site
 LOW_PCT = CONFIG["lowPct"] / 100
+TREND = CONFIG["trend"]          # only steady 5-year uptrends, when on
+ZONE = CONFIG["zone"]            # "pullback" from 52-week high, or "low" near 52-week low
 MIN_PASSES = CONFIG["minPasses"]
 EXCLUDE_SECTORS = {"Financial Services", "Real Estate"}
 ET = ZoneInfo("America/New_York")
@@ -102,6 +104,8 @@ def watchlist():
             if page["kind"] == "stock" and (
                     (page.get("excludeFin") and r["sec"] in EXCLUDE_SECTORS)
                     or (r.get("mc") or 0) < page.get("minCapB", 0) * 1e9):
+                continue
+            if TREND["on"] and not ((r.get("r2") or -1) >= TREND["r2"] and (r.get("cagr5") or -1) * 100 >= TREND["cagr"]):
                 continue
             n = passes(r, page, d.get("medians", {}))
             if n >= MIN_PASSES and r["t"] not in out:
@@ -165,29 +169,45 @@ def metrics_line(h):
             f"FCF {pct(h.get('fcfy'))} · P/E {h.get('pe') or 0:.1f}")
 
 
+def zone_txt(h):
+    if ZONE["mode"] == "pullback":
+        return f"{-h['from_high'] * 100:.1f}% below 52-wk high ${h['hi52']:.2f}"
+    return f"{h['from_low'] * 100:.1f}% above 52-wk low ${h['lo52']:.2f}"
+
+
 def build_email(hits):
+    pb = ZONE["mode"] == "pullback"
+    td = "<td style='padding:6px 10px;border-bottom:1px solid #eef1f4'>"
     lines, rows = [], []
     for h in hits:
-        lines.append(f"[{h['page']}] {h['t']} {h['n']}: ${h['px']:.2f}, {h['from_low'] * 100:.1f}% above 52-wk low "
-                     f"${h['lo52']:.2f} | {h['passes']}/5 tests | {metrics_line(h)}")
-        rows.append(
-            f"<tr><td><b><a href='https://finance.yahoo.com/quote/{escape(h['t'])}'>{escape(h['t'])}</a></b><br>"
-            f"<span style='color:#5d6b7a'>{escape(h['n'])}</span></td>"
-            f"<td><a href='{PAGE_URL}{h['url_file']}'>{escape(h['page'])}</a></td>"
-            f"<td>${h['px']:.2f}</td><td>${h['lo52']:.2f}</td><td><b>+{h['from_low'] * 100:.1f}%</b></td>"
-            f"<td>{h['passes']}/5</td><td style='color:#5d6b7a'>{escape(metrics_line(h))}</td></tr>")
-    subject = "52-week low alert: " + ", ".join(h["t"] for h in hits)
-    text = "Shortlisted names near their 52-week low:\n\n" + "\n".join(lines) + f"\n\nOpen the site: {PAGE_URL}\n"
+        trend = f"R² {h.get('r2') or 0:.2f}, {(h.get('cagr5') or 0) * 100:+.0f}%/yr"
+        lines.append(f"[{h['page']}] {h['t']} {h['n']}: ${h['px']:.2f}, {zone_txt(h)} | 5-yr trend {trend} "
+                     f"| {h['passes']}/5 tests | {metrics_line(h)}")
+        ref = h["hi52"] if pb else h["lo52"]
+        dist = f"{h['from_high'] * 100:.1f}%" if pb else f"+{h['from_low'] * 100:.1f}%"
+        cells = [
+            f"<b><a href='https://finance.yahoo.com/quote/{escape(h['t'])}'>{escape(h['t'])}</a></b><br>"
+            f"<span style='color:#5d6b7a'>{escape(h['n'])}</span>",
+            f"<a href='{PAGE_URL}{h['url_file']}'>{escape(h['page'])}</a>",
+            f"${h['px']:.2f}", f"${ref:.2f}", f"<b>{dist}</b>", escape(trend), f"{h['passes']}/5",
+            f"<span style='color:#5d6b7a'>{escape(metrics_line(h))}</span>",
+        ]
+        rows.append("<tr>" + "".join(td + c + "</td>" for c in cells) + "</tr>")
+    subject = ("Pullback alert: " if pb else "52-week low alert: ") + ", ".join(h["t"] for h in hits)
+    zone_desc = (f"{ZONE['pullback']}–{ZONE['pullbackMax']}% below their 52-week high while the 5-year uptrend holds" if pb
+                 else f"within {LOW_PCT * 100:.0f}% of their 52-week low")
+    text = f"Shortlisted names {zone_desc}:\n\n" + "\n".join(lines) + f"\n\nOpen the site: {PAGE_URL}\n"
     th = "".join(f"<th align='left' style='padding:6px 10px;border-bottom:1px solid #dde3ea'>{c}</th>" for c in
-                 ["Name", "Page", "Price", "52w low", "Above low", "Tests", "Metrics"])
-    html = (f"<div style='font-family:-apple-system,Segoe UI,sans-serif;color:#15202b'>"
-            f"<h2 style='margin:0 0 6px'>Buy-zone alert</h2>"
-            f"<p style='margin:0 0 14px;color:#5d6b7a'>These pass {MIN_PASSES}+ of the 5 tests on their page and trade within "
-            f"{LOW_PCT * 100:.0f}% of their 52-week low.</p>"
-            f"<table cellspacing='0' style='border-collapse:collapse;font-size:14px'><tr>{th}</tr>"
-            + "".join(rows).replace("<td>", "<td style='padding:6px 10px;border-bottom:1px solid #eef1f4'>")
-            + f"</table><p><a href='{PAGE_URL}'>Open the site</a></p>"
-            f"<p style='color:#93a2b2;font-size:12px'>Fundamentals from the latest scan; prices from Yahoo Finance. Not investment advice.</p></div>")
+                 ["Name", "Page", "Price", "52w high" if pb else "52w low", "From high" if pb else "Above low",
+                  "5-yr trend", "Tests", "Metrics"])
+    html = ("<div style='font-family:-apple-system,Segoe UI,sans-serif;color:#15202b'>"
+            "<h2 style='margin:0 0 6px'>Buy-zone alert</h2>"
+            f"<p style='margin:0 0 14px;color:#5d6b7a'>These pass {MIN_PASSES}+ of the 5 tests on their page and trade "
+            f"{zone_desc}.</p>"
+            f"<table cellspacing='0' style='border-collapse:collapse;font-size:14px'><tr>{th}</tr>{''.join(rows)}</table>"
+            f"<p><a href='{PAGE_URL}'>Open the site</a></p>"
+            "<p style='color:#93a2b2;font-size:12px'>Fundamentals from the latest scan; prices from Yahoo Finance. "
+            "Not investment advice.</p></div>")
     return subject, text, html
 
 
@@ -230,9 +250,13 @@ def main():
         if not g or not g["lo52"]:
             continue
         from_low = g["px"] / g["lo52"] - 1
-        if from_low <= LOW_PCT and (args.force or state.get(r["t"]) != today):
-            hits.append({**r, **g, "from_low": from_low})
-    hits.sort(key=lambda h: h["from_low"])
+        from_high = g["px"] / g["hi52"] - 1 if g["hi52"] else 0
+        # a pullback deeper than pullbackMax is a broken trend, not a dip
+        in_zone = (-ZONE["pullbackMax"] / 100 <= from_high <= -ZONE["pullback"] / 100
+                   if ZONE["mode"] == "pullback" else from_low <= LOW_PCT)
+        if in_zone and (args.force or state.get(r["t"]) != today):
+            hits.append({**r, **g, "from_low": from_low, "from_high": from_high})
+    hits.sort(key=lambda h: h["from_high"] if ZONE["mode"] == "pullback" else h["from_low"])
     log(f"checked {len(wl)} shortlisted, {len(hits)} new in buy zone")
     if not hits:
         return
@@ -241,7 +265,7 @@ def main():
     if args.dry:
         print(subject + "\n" + text)
         return
-    notify("52-week low alert", ", ".join(f"{h['t']} +{h['from_low'] * 100:.1f}%" for h in hits))
+    notify("Buy-zone alert", ", ".join(h["t"] for h in hits))
     try:
         send_email(subject, text, html)
         log(f"emailed {ALERT_TO}: {subject}")

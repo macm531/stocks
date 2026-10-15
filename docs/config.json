@@ -164,5 +164,15 @@
     "disc": 10,
     "term": 2.5,
     "gcap": 15
+  },
+  "trend": {
+    "on": true,
+    "r2": 0.75,
+    "cagr": 10
+  },
+  "zone": {
+    "mode": "pullback",
+    "pullback": 10,
+    "pullbackMax": 30
   }
 }

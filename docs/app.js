@@ -47,6 +47,17 @@
       bad: r => r.iv != null && r.iv <= 0 ? "DCF value is negative (debt exceeds cash-flow value)." : r.fcf0 != null && r.fcf0 <= 0 ? "Negative average free cash flow; DCF not meaningful." : null },
   };
 
+  // 5-year mini chart (weekly closes, every 4th week). Green when the trend is steady and rising.
+  function spark(r, w = 96, h = 26) {
+    const p = r.spark;
+    if (!p || p.length < 2) return `<span class="spark-na">—</span>`;
+    const lo = Math.min(...p), hi = Math.max(...p), span = hi - lo || 1;
+    const pts = p.map((v, i) => `${(i / (p.length - 1) * (w - 2) + 1).toFixed(1)},${(h - 2 - (v - lo) / span * (h - 4)).toFixed(1)}`).join(" ");
+    const good = r.r2 != null && r.r2 >= S.r2 && r.cagr5 != null && r.cagr5 * 100 >= S.cagr;
+    return `<svg class="spark ${good ? "up" : "flat"}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="5-year price chart"><polyline points="${pts}" fill="none" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  }
+  const trendTxt = r => r.r2 == null ? "No 5-year history" : `R² ${r.r2.toFixed(2)} · ${r.cagr5 >= 0 ? "+" : ""}${(r.cagr5 * 100).toFixed(0)}%/yr`;
+
   // Two-stage DCF on average free cash flow. Growth = historical FCF growth, capped; fades to terminal over years 6–10.
   function dcf(r) {
     const d = S.disc / 100, tg = S.term / 100, cap = S.gcap / 100;
@@ -65,7 +76,7 @@
   }
 
   let CFG, P, PID = window.PAGE_ID, DATA = null, ranked = [], S = {}, DEF = {};
-  let sortK = null, sortDir = -1, shown = 60, open = new Set();
+  let sortK = null, sortDir = -1, shown = 60, open = new Set(), baseCount = 0;
   const KEY = () => "vqs-settings-" + PID;
   const isStock = () => P.kind === "stock";
 
@@ -116,14 +127,28 @@
   </header>
   <div class="desk">
     <aside class="rail" aria-label="Screening criteria">
+      <div class="eyebrow">Chart shape</div>
+      <label class="opt"><input id="o-trend" type="checkbox"> <span><b>Only steady uptrends</b><br><span style="color:var(--muted)">5-year charts that climb up and to the right</span></span></label>
+      <div class="crit">
+        <div class="crit-top"><label for="o-r2">Trend steadiness at least</label><span class="cnt" id="c-trend"></span></div>
+        <div class="field"><input id="o-r2" type="number" step="0.05" min="0" max="1"><span>R² (0–1)</span></div>
+        <small>How closely the 5-year price follows a straight rising line on a log scale. NVDA and CAT score about 0.88; a choppy sideways chart scores under 0.5.</small>
+      </div>
+      <div class="crit">
+        <label for="o-cagr">5-year price growth at least</label>
+        <div class="field"><input id="o-cagr" type="number" step="1"><span>% a year</span></div>
+      </div>
+      <hr>
       <div class="eyebrow">Criteria</div>
       ${crit}
       <hr>
       ${stockOpts}
       <div class="crit">
-        <div class="crit-top"><label for="o-low">Buy zone: within</label><span class="cnt" id="c-low"></span></div>
-        <div class="field"><input id="o-low" type="number" step="1" min="0"><span>% of 52-week low</span></div>
-        <small>Picks passing ${CFG.minPasses}+ tests this close to their 52-week low show in the buy zone. Email alerts use the default thresholds.</small>
+        <div class="crit-top"><label for="o-zmode">Buy zone</label><span class="cnt" id="c-low"></span></div>
+        <select id="o-zmode" class="zsel"><option value="pullback">Pullback from 52-week high</option><option value="low">Near 52-week low</option></select>
+        <div class="field" id="zone-pull"><input id="o-pull" type="number" step="1" min="0"><span>to</span><input id="o-pullmax" type="number" step="5" min="0"><span>% below the high</span></div>
+        <div class="field" id="zone-low"><input id="o-low" type="number" step="1" min="0"><span>% or less above the low</span></div>
+        <small>Picks passing ${CFG.minPasses}+ tests that are in this zone show in the buy zone. Email alerts use the default settings.</small>
       </div>
       <button class="reset" id="reset" type="button">Reset to defaults</button>
     </aside>
@@ -131,7 +156,7 @@
       <div class="summary" id="summary"></div>
       <div class="funnel"><h2>Screening funnel</h2><div id="funnel"></div></div>
       <section class="block">
-        <div class="bhead"><div><h2>Buy zone</h2><p>Passing ${CFG.minPasses}+ tests and trading near the 52-week low, closest first. These trigger email alerts.</p></div></div>
+        <div class="bhead"><div><h2>Buy zone</h2><p id="zone-desc">Passing ${CFG.minPasses}+ tests and in the buy zone you set on the left. These trigger email alerts.</p></div></div>
         <div class="picks" id="zone"></div>
       </section>
       <section class="block">
@@ -153,7 +178,7 @@
         <div class="tablebox"><table>
           <thead><tr><th>#</th><th data-k="t">${isStock() ? "Stock" : "Fund"}</th><th data-k="grp">${isStock() ? "Sector" : "Category"}</th>
             <th data-k="passes" class="r">Tests</th><th data-k="score" class="r">Score</th>${metricTh}
-            <th data-k="fromLow" class="r">Above 52w low</th>${extraTh}</tr></thead>
+            <th data-k="r2">5-yr chart</th><th data-k="fromLow" class="r">Above 52w low</th>${extraTh}</tr></thead>
           <tbody id="tb"></tbody>
         </table></div>
         <div class="more"><button class="reset" id="more" type="button" hidden>Show more</button></div>
@@ -169,14 +194,16 @@
 
   // ---------- settings ----------
   function defaults() {
-    const d = { low: CFG.lowPct };
+    const d = { low: CFG.lowPct, trendOn: CFG.trend.on, r2: CFG.trend.r2, cagr: CFG.trend.cagr, zmode: CFG.zone.mode, pull: CFG.zone.pullback, pullMax: CFG.zone.pullbackMax };
     for (const t of P.tests) d[t.k] = t.t;
     if (isStock()) Object.assign(d, { sector: !!P.sectorPE, fin: !!P.excludeFin, mcap: P.minCapB || 0, ...CFG.dcf });
     return d;
   }
   function syncInputs() {
     for (const t of P.tests) $("t-" + t.k).value = S[t.k];
-    $("o-low").value = S.low;
+    $("o-low").value = S.low; $("o-pull").value = S.pull; $("o-pullmax").value = S.pullMax; $("o-zmode").value = S.zmode;
+    $("o-trend").checked = S.trendOn; $("o-r2").value = S.r2; $("o-cagr").value = S.cagr;
+    $("zone-low").hidden = S.zmode !== "low"; $("zone-pull").hidden = S.zmode !== "pullback";
     if (isStock()) {
       if ($("o-sector")) $("o-sector").checked = S.sector;
       $("o-fin").checked = S.fin; $("o-mcap").value = S.mcap;
@@ -213,13 +240,17 @@
     if (r.roic != null && r.roic > 0.8) warn.push("ROIC");
     if (!isStock() && r.pe != null && r.pe > 80) warn.push("P/E");
     const fromLow = r.lo52 && r.px ? r.px / r.lo52 - 1 : null;
+    const fromHigh = r.hi52 && r.px ? r.px / r.hi52 - 1 : null;
     return { ...r, grp: isStock() ? r.sec : (r.cat || r.grp), ev, passes, score, warn, fromLow,
       up: r.tgt && r.px ? r.tgt / r.px - 1 : null,
       rangePos: r.lo52 && r.hi52 && r.hi52 > r.lo52 && r.px ? clamp((r.px - r.lo52) / (r.hi52 - r.lo52)) : null,
-      nearLow: fromLow != null && fromLow <= S.low / 100 };
+      fromHigh,
+      nearLow: S.zmode === "low" ? fromLow != null && fromLow <= S.low / 100 : fromHigh != null && fromHigh <= -S.pull / 100 && fromHigh >= -S.pullMax / 100 };
   }
 
-  function inUniverse(r) {
+  const steady = r => r.r2 != null && r.r2 >= S.r2 && r.cagr5 != null && r.cagr5 * 100 >= S.cagr;
+  function inUniverse(r, ignoreTrend) {
+    if (S.trendOn && !ignoreTrend && !steady(r)) return false;
     if (P.universe === "bc" && !r.bc) return false;
     if (isStock() && S.fin && FIN.has(r.sec)) return false;
     if (isStock() && (r.mc || 0) < S.mcap * 1e9) return false;
@@ -227,7 +258,8 @@
   }
 
   function rankAll() {
-    ranked = DATA.rows.filter(inUniverse).map(evaluate).sort((a, b) => b.passes - a.passes || b.score - a.score);
+    baseCount = DATA.rows.filter(r => inUniverse(r, true)).length;
+    ranked = DATA.rows.filter(r => inUniverse(r)).map(evaluate).sort((a, b) => b.passes - a.passes || b.score - a.score);
     ranked.forEach((r, i) => r.rank = i + 1);
     const prevPass = new Set();
     if (DATA.prev) {
@@ -252,16 +284,19 @@
     $("summary").innerHTML = `
       <div class="stat${all5 ? " hot" : ""}"><div class="eyebrow">Pass all ${N}</div><div class="v">${all5}</div><div class="s">full matches</div></div>
       <div class="stat"><div class="eyebrow">Pass ${N - 1} of ${N}</div><div class="v">${four}</div><div class="s">near misses</div></div>
-      <div class="stat${zone ? " hot" : ""}"><div class="eyebrow">In buy zone</div><div class="v">${zone}</div><div class="s">near 52-week low</div></div>
+      <div class="stat${zone ? " hot" : ""}"><div class="eyebrow">In buy zone</div><div class="v">${zone}</div><div class="s">${S.zmode === "low" ? "near 52-week low" : "pulled back from high"}</div></div>
       <div class="stat"><div class="eyebrow">Screened</div><div class="v">${ranked.length.toLocaleString()}</div><div class="s">${isStock() ? (P.universe === "bc" ? "S&amp;P 100 + Dow 30" : "of " + DATA.universe.toLocaleString() + " in the S&amp;P 1500") : "equity ETFs"}</div></div>`;
   }
 
   function renderFunnel() {
-    let set = ranked, max = ranked.length || 1, html = "";
-    const steps = [[isStock() ? "Universe" : "All funds", () => true], ...P.tests.map((t, i) => [(i ? "+ " : "") + META[t.k].title.replace(/ (below|above)$/, ""), r => r.ev[t.k].pass])];
+    let set = ranked, max = baseCount || 1, html = "";
+    const row = (name, n) => `<div class="frow"><span>${name}</span><div class="ftrack"><div class="fbar" style="width:${Math.max(n ? 0.6 : 0, n / max * 100)}%"></div></div><span class="num">${n}</span></div>`;
+    if (S.trendOn) html += row(isStock() ? "Universe" : "All funds", baseCount);
+    $("c-trend").textContent = S.trendOn ? ranked.length + " steady" : "off";
+    const steps = [[S.trendOn ? "Steady uptrend" : (isStock() ? "Universe" : "All funds"), () => true], ...P.tests.map((t, i) => [(i ? "+ " : "") + META[t.k].title.replace(/ (below|above)$/, ""), r => r.ev[t.k].pass])];
     for (const [name, f] of steps) {
       set = set.filter(f);
-      html += `<div class="frow"><span>${name}</span><div class="ftrack"><div class="fbar" style="width:${Math.max(set.length ? 0.6 : 0, set.length / max * 100)}%"></div></div><span class="num">${set.length}</span></div>`;
+      html += row(name, set.length);
     }
     $("funnel").innerHTML = html;
     for (const t of P.tests) $("c-" + t.k).textContent = ranked.filter(r => r.ev[t.k].pass).length + " pass";
@@ -272,7 +307,7 @@
   function chips(r) {
     let h = "";
     if (r.isNew) h += `<span class="chip new">New</span>`;
-    if (r.nearLow) h += `<span class="chip new">Near 52-wk low</span>`;
+    if (r.nearLow) h += `<span class="chip new">${S.zmode === "low" ? "Near 52-wk low" : "Pulled back " + Math.round(-r.fromHigh * 100) + "%"}</span>`;
     if (r.mos != null && r.mos >= 0.25 && !P.tests.some(t => t.k === "mos")) h += `<span class="chip">${pct(r.mos, 0)} below DCF value</span>`;
     if (r.warn.length) h += `<span class="chip warn">Check data: ${r.warn.join(", ")}</span>`;
     return h;
@@ -292,17 +327,20 @@
         <div class="pick-top"><div><div class="tick">${esc(r.t)}</div><div class="pname">${sub(r)}</div></div>
           <div class="score">${r.score}<small>score</small></div></div>
         ${mgrid(r)}
+        <div class="sparkrow">${spark(r, 220, 40)}<span>${trendTxt(r)}</span></div>
         <div class="chips">${chips(r)}${extraChip(r)}</div>
       </button>`).join("");
   }
 
   function renderZone() {
-    const z = ranked.filter(r => r.passes >= CFG.minPasses && r.nearLow).sort((a, b) => a.fromLow - b.fromLow);
-    if (!z.length) { $("zone").innerHTML = `<div class="empty">Nothing passing ${CFG.minPasses}+ tests is within ${S.low}% of its 52-week low right now.</div>`; return; }
+    const pb = S.zmode === "pullback";
+    const z = ranked.filter(r => r.passes >= CFG.minPasses && r.nearLow).sort((a, b) => pb ? b.score - a.score : a.fromLow - b.fromLow);
+    if (!z.length) { $("zone").innerHTML = `<div class="empty">Nothing passing ${CFG.minPasses}+ tests is ${pb ? `${S.pull}–${S.pullMax}% below its 52-week high` : `within ${S.low}% of its 52-week low`} right now.</div>`; return; }
     $("zone").innerHTML = z.map(r => `
       <button class="pick" type="button" data-t="${esc(r.t)}">
         <div class="pick-top"><div><div class="tick">${esc(r.t)}</div><div class="pname">${sub(r)} · ${r.passes}/${P.tests.length} tests</div></div>
-          <div class="score">+${(r.fromLow * 100).toFixed(1)}%<small>above low</small></div></div>
+          <div class="score">${pb ? (r.fromHigh * 100).toFixed(1) + "%<small>from high</small>" : "+" + (r.fromLow * 100).toFixed(1) + "%<small>above low</small>"}</div></div>
+        <div class="sparkrow">${spark(r, 220, 40)}<span>${trendTxt(r)}</span></div>
         <div class="range"><span class="mono">$${fx(r.lo52)}</span><div class="rtrack"><i style="left:${(r.rangePos ?? 0) * 100}%"></i></div><span class="mono">$${fx(r.hi52)}</span></div>
         <div class="chips">${chipMuted(`Price $${fx(r.px)} · score ${r.score}`)}${r.warn.length ? `<span class="chip warn">Check data</span>` : ""}</div>
       </button>`).join("");
@@ -337,7 +375,8 @@
       <tr><td>Net margin</td>${r.h.nm.map(v => `<td class="n">${pct(v, 1)}</td>`).join("")}</tr>
       <tr><td>Free cash flow</td>${r.h.fcf.map(v => `<td class="n${v != null && v < 0 ? " bad" : ""}">${money(v)}</td>`).join("")}</tr>
       </tbody></table></div>`;
-    return `<div class="why">${lines}</div>${dcfTxt}${hist}
+    const trendLine = `<p class="dcf"><b>5-year chart:</b> ${r.r2 == null ? "not enough price history." : `steadiness R² ${r.r2.toFixed(2)} (${steady(r) ? "passes" : "below"} your ${S.r2} bar), ${(r.cagr5 * 100).toFixed(1)}% a year, worst drop along the way ${(r.maxdd * 100).toFixed(0)}%. Now ${(r.fromHigh * 100).toFixed(1)}% from its 52-week high.`}</p>`;
+    return `<div class="why">${lines}</div>${trendLine}${dcfTxt}${hist}
       <div class="extra">${extra}<span>52-wk range $${fx(r.lo52)}–$${fx(r.hi52)}</span>
         <a href="https://finance.yahoo.com/quote/${encodeURIComponent(r.t)}" target="_blank" rel="noopener">Yahoo Finance ↗</a></div>`;
   }
@@ -351,7 +390,7 @@
       return (typeof x === "string" ? x.localeCompare(y) : x - y) * sortDir;
     });
     document.querySelectorAll("th[data-k]").forEach(th => th.classList.toggle("sorted", th.dataset.k === sortK));
-    const ncol = 7 + P.tests.length + (isStock() ? (P.tests.some(t => t.k === "mos") ? 2 : 3) : 2);
+    const ncol = 8 + P.tests.length + (isStock() ? (P.tests.some(t => t.k === "mos") ? 2 : 3) : 2);
     const extraTd = r => isStock()
       ? `${P.tests.some(t => t.k === "mos") ? "" : `<td class="n${r.mos >= 0.25 ? " ok" : ""}">${META.mos.show(r)}</td>`}<td class="n">${r.iv == null ? "—" : "$" + fx(r.iv)}</td><td class="n">${money(r.mc)}</td>`
       : `<td class="n">${pct(r.r3, 1)}</td><td class="n">${fx(r.beta)}</td>`;
@@ -362,6 +401,7 @@
         <td class="n"><span class="dots">${P.tests.map(t => `<i class="${r.ev[t.k].pass ? "on" : ""}"></i>`).join("")}</span></td>
         <td class="n">${r.score}<span class="bar"><i style="width:${r.score}%"></i></span></td>
         ${P.tests.map(t => `<td class="n ${cls(r.ev[t.k])}">${META[t.k].show(r)}</td>`).join("")}
+        <td class="trendcell">${spark(r)}<small>${trendTxt(r)}</small></td>
         <td class="n${r.nearLow ? " ok" : ""}">${r.fromLow == null ? "—" : "+" + (r.fromLow * 100).toFixed(1) + "%"}${r.rangePos == null ? "" : `<span class="bar" title="Position in 52-week range"><i style="width:${Math.max(3, r.rangePos * 100)}%"></i></span>`}</td>
         ${extraTd(r)}</tr>` + (open.has(r.t) ? `<tr class="detail"><td colspan="${ncol}">${why(r)}</td></tr>` : "")).join("")
       || `<tr><td colspan="${ncol}" style="text-align:center;color:var(--muted);padding:24px">Nothing matches these filters.</td></tr>`;
@@ -394,7 +434,7 @@
         for (const r of DATA.rows) { const q = L.q[r.t]; if (q) { r.px = q[0]; r.lo52 = q[1]; r.hi52 = q[2]; } }
         DATA.live = L.at;
       } catch (e) {}
-      const groups = [...new Set(DATA.rows.filter(inUniverse).map(r => isStock() ? r.sec : (r.cat || r.grp)))].sort();
+      const groups = [...new Set(DATA.rows.filter(r => inUniverse(r, true)).map(r => isStock() ? r.sec : (r.cat || r.grp)))].sort();
       const cur = $("sec").value;
       $("sec").innerHTML = `<option value="">${isStock() ? "All sectors" : "All categories"}</option>` + groups.map(s => `<option${s === cur ? " selected" : ""}>${esc(s)}</option>`).join("");
       stamp(); renderAll();
@@ -409,7 +449,9 @@
   function wire() {
     const num = (id, k) => $(id).addEventListener("input", e => { const v = parseFloat(e.target.value); if (isNaN(v)) return; S[k] = v; save(); if (DATA) renderAll(); });
     for (const t of P.tests) num("t-" + t.k, t.k);
-    num("o-low", "low");
+    num("o-low", "low"); num("o-pull", "pull"); num("o-pullmax", "pullMax"); num("o-r2", "r2"); num("o-cagr", "cagr");
+    $("o-trend").addEventListener("change", e => { S.trendOn = e.target.checked; save(); renderAll(); });
+    $("o-zmode").addEventListener("change", e => { S.zmode = e.target.value; save(); syncInputs(); renderAll(); });
     if (isStock()) {
       num("o-mcap", "mcap"); num("o-disc", "disc"); num("o-term", "term"); num("o-gcap", "gcap");
       if ($("o-sector")) $("o-sector").addEventListener("change", e => { S.sector = e.target.checked; save(); renderAll(); });
