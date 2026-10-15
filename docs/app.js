@@ -228,7 +228,9 @@
       $("o-disc").value = S.disc; $("o-term").value = S.term; $("o-gcap").value = S.gcap;
     }
   }
-  function save() { try { localStorage.setItem(KEY(), JSON.stringify(S)); } catch (e) {} }
+  // Screening changes last only while the page is open; every visit starts from the defaults.
+  // Only the show/hide-settings preference is remembered.
+  function save() { try { localStorage.setItem(KEY(), JSON.stringify({ showSettings: S.showSettings })); } catch (e) {} }
 
   // ---------- scoring ----------
   function evaluate(r) {
@@ -519,7 +521,11 @@
     P = CFG.pages[PID];
     DEF = defaults();
     S = { ...DEF };
-    try { Object.assign(S, JSON.parse(localStorage.getItem(KEY()) || "{}")); } catch (e) {}
+    try {
+      const saved = JSON.parse(localStorage.getItem(KEY()) || "{}");
+      if (typeof saved.showSettings === "boolean") S.showSettings = saved.showSettings;
+      save();  // drops any screening settings stored by older versions
+    } catch (e) {}
     shell(); syncInputs(); wire(); load(false);
   }
   boot();
