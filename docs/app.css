@@ -176,3 +176,11 @@ tr.detail td { background: var(--bg); white-space: normal; padding: 16px 18px; }
 .topnav a.tab:hover { color: var(--ink); border-color: var(--line); }
 .topnav a.tab[aria-current="page"] { background: var(--ink); color: var(--bg); }
 
+
+/* breakdown: DCF + history */
+tr.detail .dcf { margin: 14px 0 0; font-size: 13.5px; max-width: 90ch; }
+tr.detail .dcf b { color: var(--accent); }
+.hist { margin-top: 12px; overflow-x: auto; }
+.hist table { min-width: 0; width: auto; font-size: 12.5px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; border-collapse: separate; }
+.hist th, .hist td { padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.hist tr:last-child td { border-bottom: 0; }

@@ -98,6 +98,65 @@ def row(df, *names):
     return None
 
 
+def series(df, *names):
+    """{year: value} for the first matching row, skipping blanks."""
+    if df is None or df.empty:
+        return {}
+    for n in names:
+        if n in df.index:
+            out = {}
+            for col, v in df.loc[n].items():
+                v = num(v)
+                if v is not None:
+                    out[col.year] = v
+            if out:
+                return out
+    return {}
+
+
+def history(inc, bs, cf):
+    """Multi-year record for Buffett-style tests (Yahoo provides ~4 annual years)."""
+    ni = series(inc, "Net Income Common Stockholders", "Net Income")
+    rev = series(inc, "Total Revenue")
+    eq = series(bs, "Stockholders Equity", "Common Stock Equity")
+    fcf = series(cf, "Free Cash Flow")
+    if not fcf:
+        ocf, capex = series(cf, "Operating Cash Flow"), series(cf, "Capital Expenditure")
+        fcf = {y: ocf[y] + capex.get(y, 0) for y in ocf}
+    years = sorted(set(ni) | set(fcf))
+    rnd = lambda x, d=4: None if x is None else round(x, d)
+    h = {
+        "y": years,
+        "roe": [rnd(ni[y] / eq[y]) if y in ni and eq.get(y, 0) > 0 else None for y in years],
+        "nm": [rnd(ni[y] / rev[y]) if y in ni and rev.get(y, 0) > 0 else None for y in years],
+        "fcf": [fcf.get(y) for y in years],
+    }
+    return h
+
+
+def derived(h, debt, cash, ni_latest):
+    """Summary stats the tests use, plus DCF inputs (the DCF itself runs on the page)."""
+    roe = [x for x in h["roe"] if x is not None]
+    nm = [x for x in h["nm"] if x is not None]
+    fcf = [x for x in h["fcf"] if x is not None]
+    out = {
+        "roemin": min(roe) if len(roe) >= 3 else None,
+        "roeavg": sum(roe) / len(roe) if len(roe) >= 3 else None,
+        # latest net margin vs the average of earlier years, in percentage points
+        "mgr": (nm[-1] - sum(nm[:-1]) / len(nm[:-1])) * 100 if len(nm) >= 3 else None,
+        "fcfc": 100 * sum(1 for x in fcf if x > 0) / len(fcf) if len(fcf) >= 3 else None,
+        "dny": (debt or 0) / ni_latest if ni_latest and ni_latest > 0 else None,
+        "fcf0": sum(fcf[-3:]) / len(fcf[-3:]) if fcf else None,
+        "netcash": (cash or 0) - (debt or 0),
+    }
+    # FCF growth: CAGR from first to last positive year; the page caps it
+    if len(fcf) >= 3 and fcf[0] > 0 and fcf[-1] > 0:
+        out["fcfg"] = (fcf[-1] / fcf[0]) ** (1 / (len(fcf) - 1)) - 1
+    else:
+        out["fcfg"] = None
+    return {k: (round(v, 4) if isinstance(v, float) else v) for k, v in out.items()}
+
+
 def fetch(sym, index, tries=3):
     for attempt in range(tries):
         try:
@@ -122,7 +181,7 @@ def _fetch(sym, index):
     if peg is None and pe and growth and growth > 0:
         peg, peg_src = pe / (growth * 100), "calc"
 
-    inc, bs = t.income_stmt, t.balance_sheet
+    inc, bs, cf = t.income_stmt, t.balance_sheet, t.cashflow
     debt = row(bs, "Total Debt")
     equity = row(bs, "Stockholders Equity", "Common Stock Equity")
     cash = row(bs, "Cash Cash Equivalents And Short Term Investments", "Cash And Cash Equivalents") or 0
@@ -142,6 +201,8 @@ def _fetch(sym, index):
         if invested > 0:
             roic = ebit * (1 - tax) / invested
 
+    h = history(inc, bs, cf)
+    ni_latest = row(inc, "Net Income Common Stockholders", "Net Income")
     fcf = num(i.get("freeCashflow"))
     fcfy = fcf / mcap if fcf is not None and mcap else None
 
@@ -166,6 +227,9 @@ def _fetch(sym, index):
         "dy": num(i.get("dividendYield")),
         "tgt": num(i.get("targetMeanPrice")),
         "chg52": num(i.get("52WeekChange")),
+        "sh": num(i.get("sharesOutstanding") or i.get("impliedSharesOutstanding")),
+        "h": h,
+        **derived(h, debt, cash, ni_latest),
     }
 
 
@@ -232,7 +296,8 @@ def main():
     if OUT.exists():
         try:
             old = json.loads(OUT.read_text())
-            prev = {"at": old["at"], "rows": {r["t"]: {k: r.get(k) for k in ("pe", "peg", "de", "roic", "fcfy")} for r in old["rows"]}}
+            keep = ("pe", "peg", "de", "roic", "fcfy", "roemin", "dny", "mgr", "fcfc", "fcf0", "fcfg", "netcash", "sh")
+            prev = {"at": old["at"], "rows": {r["t"]: {k: r.get(k) for k in keep} for r in old["rows"]}}
         except Exception:
             prev = None
 

@@ -47,7 +47,7 @@ EXCLUDE_SECTORS = {"Financial Services", "Real Estate"}
 ET = ZoneInfo("America/New_York")
 
 # Raw value -> threshold units, and which values count as invalid (always fail). Mirrors META in docs/app.js.
-UNIT = {"roic": 100, "fcfy": 100, "r5": 100, "yld": 100, "aum": 1e-9}
+UNIT = {"roic": 100, "fcfy": 100, "r5": 100, "yld": 100, "aum": 1e-9, "roemin": 100, "mos": 100}
 VALID = {"peg": lambda v: v > 0, "pe": lambda v: v > 0, "de": lambda v: v >= 0}
 
 
@@ -58,14 +58,32 @@ def log(msg):
         f.write(line + "\n")
 
 
+def dcf(r):
+    """Same two-stage DCF as docs/app.js, with the default assumptions. Returns (value/share, margin of safety)."""
+    a = CONFIG["dcf"]
+    d, tg, cap = a["disc"] / 100, a["term"] / 100, a["gcap"] / 100
+    if not r.get("fcf0") or r["fcf0"] <= 0 or not r.get("sh") or d <= tg:
+        return None, None
+    g = r["fcfg"] if r.get("fcfg") is not None else (r["eg"] if (r.get("eg") or 0) > 0 else 0.03)
+    g = max(0, min(cap, g))
+    f, pv = r["fcf0"], 0.0
+    for y in range(1, 11):
+        gy = g if y <= 5 else g + (tg - g) * (y - 5) / 5
+        f *= 1 + gy
+        pv += f / (1 + d) ** y
+    tv = f * (1 + tg) / (d - tg) / (1 + d) ** 10
+    iv = (pv + tv + (r.get("netcash") or 0)) / r["sh"]
+    return iv, (1 - r["px"] / iv if iv > 0 and r.get("px") else None)
+
+
 def passes(r, page, medians):
     n = 0
     for t in page["tests"]:
-        v = r.get(t["k"])
+        v = dcf(r)[1] if t["k"] == "mos" else r.get(t["k"])
         if v is None or not VALID.get(t["k"], lambda _: True)(v):
             continue
         x = v * UNIT.get(t["k"], 1)
-        ok = x < t["t"] if t["dir"] == "lt" else x > t["t"]
+        ok = x < t["t"] if t["dir"] == "lt" else x >= t["t"] if t["dir"] == "ge" else x > t["t"]
         if ok and t["k"] == "pe" and page.get("sectorPE"):
             med = medians.get(r.get("sec"), medians.get("_market"))
             ok = med is None or v < med
@@ -87,7 +105,7 @@ def watchlist():
                 continue
             n = passes(r, page, d.get("medians", {}))
             if n >= MIN_PASSES and r["t"] not in out:
-                out[r["t"]] = {**r, "passes": n, "page": page["nav"], "kind": page["kind"], "url_file": page["file"]}
+                out[r["t"]] = {**r, "passes": n, "page": page["nav"], "pid": pid, "kind": page["kind"], "url_file": page["file"]}
     return list(out.values())
 
 
@@ -136,6 +154,10 @@ def pct(x):
 
 
 def metrics_line(h):
+    if h["pid"] == "buffett":
+        iv, mos = dcf(h)
+        return (f"ROE min {pct(h.get('roemin'))} · Debt {h.get('dny') or 0:.1f}y of earnings · "
+                f"DCF value ${iv or 0:.2f} · Safety {pct(mos)}")
     if h["kind"] == "etf":
         er = "—" if h.get("er") is None else f"{h['er']:.2f}%"
         return f"Fee {er} · P/E {h.get('pe') or 0:.1f} · 5-yr {pct(h.get('r5'))} · Yield {pct(h.get('yld'))}"

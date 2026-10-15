@@ -30,7 +30,39 @@
       hint: "Average annual total return over five years." },
     yld: { label: "Yield", title: "Yield above", sfx: "%", step: 0.25, unit: v => v * 100, show: r => pct(r.yld, 2),
       hint: "Trailing distribution yield." },
+    roemin: { label: "ROE", title: "ROE every year above", sfx: "%", step: 1, unit: v => v * 100, show: r => pct(r.roemin, 0),
+      hint: "Lowest annual return on equity in the record. Buffett wants 15%+ consistently, not one good year." },
+    dny: { label: "Debt yrs", title: "Debt paid off within", sfx: "yrs", step: 0.5, unit: v => v, show: r => r.dny == null ? "—" : r.dny.toFixed(1) + "y",
+      hint: "Total debt divided by annual net income: years of earnings needed to clear all debt. Losses fail.",
+      bad: r => r.dny == null && r.roemin != null ? "No profit to pay debt from." : null },
+    mgr: { label: "Margin", title: "Net margin change above", sfx: "pts", step: 0.5, unit: v => v, range: [-2, 3],
+      show: r => r.mgr == null ? "—" : (r.mgr >= 0 ? "+" : "") + r.mgr.toFixed(1) + "pt",
+      hint: "Latest net margin minus the average of earlier years. Rising margins signal pricing power." },
+    fcfc: { label: "FCF+", title: "Years with positive FCF at least", sfx: "%", step: 25, unit: v => v, range: [50, 100],
+      show: r => r.fcfc == null ? "—" : Math.round(r.fcfc) + "%",
+      hint: "Share of years the business produced positive free cash flow. 100% means every year." },
+    mos: { label: "Safety", title: "Margin of safety above", sfx: "%", step: 5, unit: v => v * 100, range: [0, 50],
+      show: r => r.mos == null ? "—" : pct(r.mos, 0),
+      hint: "How far the price sits below the DCF intrinsic value. Buffett wants 20–30%+ as a buffer.",
+      bad: r => r.iv != null && r.iv <= 0 ? "DCF value is negative (debt exceeds cash-flow value)." : r.fcf0 != null && r.fcf0 <= 0 ? "Negative average free cash flow; DCF not meaningful." : null },
   };
+
+  // Two-stage DCF on average free cash flow. Growth = historical FCF growth, capped; fades to terminal over years 6–10.
+  function dcf(r) {
+    const d = S.disc / 100, tg = S.term / 100, cap = S.gcap / 100;
+    if (!r.fcf0 || r.fcf0 <= 0 || !r.sh || d <= tg) return null;
+    let g = r.fcfg != null ? r.fcfg : (r.eg > 0 ? r.eg : 0.03);
+    g = Math.max(0, Math.min(cap, g));
+    let f = r.fcf0, pv = 0;
+    for (let y = 1; y <= 10; y++) {
+      const gy = y <= 5 ? g : g + (tg - g) * (y - 5) / 5;
+      f *= 1 + gy;
+      pv += f / Math.pow(1 + d, y);
+    }
+    const tv = f * (1 + tg) / (d - tg) / Math.pow(1 + d, 10);
+    const iv = (pv + tv + (r.netcash || 0)) / r.sh;
+    return { iv, g, mos: iv > 0 && r.px ? 1 - r.px / iv : null };
+  }
 
   let CFG, P, PID = window.PAGE_ID, DATA = null, ranked = [], S = {}, DEF = {};
   let sortK = null, sortDir = -1, shown = 60, open = new Set();
@@ -52,10 +84,19 @@
     const stockOpts = isStock() ? `
       <label class="opt"><input id="o-fin" type="checkbox"> Exclude financials and real estate <span style="color:var(--muted)">(D/E and ROIC don't apply to banks and REITs)</span></label>
       <div class="crit"><label for="o-mcap">Minimum market cap</label>
-        <div class="field"><input id="o-mcap" type="number" step="0.5" min="0"><span>$ billion</span></div></div>` : "";
+        <div class="field"><input id="o-mcap" type="number" step="0.5" min="0"><span>$ billion</span></div></div>
+      <hr>
+      <div class="eyebrow">DCF assumptions</div>
+      <div class="crit"><label for="o-disc">Discount rate</label>
+        <div class="field"><input id="o-disc" type="number" step="0.5" min="1"><span>% a year (your required return)</span></div></div>
+      <div class="crit"><label for="o-term">Terminal growth</label>
+        <div class="field"><input id="o-term" type="number" step="0.5" min="0"><span>% a year after year 10</span></div></div>
+      <div class="crit"><label for="o-gcap">Growth cap</label>
+        <div class="field"><input id="o-gcap" type="number" step="1" min="0"><span>% a year, years 1–5</span></div>
+        <small>Each company grows at its own past free-cash-flow growth, limited to this cap, then fades to the terminal rate.</small></div>` : "";
     const metricTh = P.tests.map(t => `<th data-k="${t.k}" class="r">${META[t.k].label}</th>`).join("");
     const extraTh = isStock()
-      ? `<th data-k="up" class="r">To target</th><th data-k="mc" class="r">Mkt cap</th>`
+      ? `${P.tests.some(t => t.k === "mos") ? "" : `<th data-k="mos" class="r">Safety</th>`}<th data-k="iv" class="r">DCF value</th><th data-k="mc" class="r">Mkt cap</th>`
       : `<th data-k="r3" class="r">3-yr</th><th data-k="beta" class="r">Beta</th>`;
     document.getElementById("app").innerHTML = `
   <nav class="topnav" aria-label="Pages"><a class="brand" href="index.html">Stock Desk</a>${nav}</nav>
@@ -94,7 +135,7 @@
         <div class="picks" id="zone"></div>
       </section>
       <section class="block">
-        <div class="bhead"><div><h2>Top picks</h2><p>Passing all five tests, best composite score first.</p></div></div>
+        <div class="bhead"><div><h2>Top picks</h2><p>Passing all ${P.tests.length} tests, best composite score first.</p></div></div>
         <div class="picks" id="picks"></div>
       </section>
       <section class="block">
@@ -104,7 +145,7 @@
             <input id="q" type="search" placeholder="Search ticker or name" aria-label="Search ticker or name">
             <select id="minp" aria-label="Minimum tests passed">
               <option value="0">All</option><option value="3">3+ tests passed</option>
-              <option value="4">4+ tests passed</option><option value="5">All 5 passed</option>
+              <option value="4">4+ tests passed</option><option value="${P.tests.length}">All ${P.tests.length} passed</option>
             </select>
             <select id="sec" aria-label="Group"></select>
           </div>
@@ -130,26 +171,32 @@
   function defaults() {
     const d = { low: CFG.lowPct };
     for (const t of P.tests) d[t.k] = t.t;
-    if (isStock()) Object.assign(d, { sector: !!P.sectorPE, fin: !!P.excludeFin, mcap: P.minCapB || 0 });
+    if (isStock()) Object.assign(d, { sector: !!P.sectorPE, fin: !!P.excludeFin, mcap: P.minCapB || 0, ...CFG.dcf });
     return d;
   }
   function syncInputs() {
     for (const t of P.tests) $("t-" + t.k).value = S[t.k];
     $("o-low").value = S.low;
-    if (isStock()) { $("o-sector").checked = S.sector; $("o-fin").checked = S.fin; $("o-mcap").value = S.mcap; }
+    if (isStock()) {
+      if ($("o-sector")) $("o-sector").checked = S.sector;
+      $("o-fin").checked = S.fin; $("o-mcap").value = S.mcap;
+      $("o-disc").value = S.disc; $("o-term").value = S.term; $("o-gcap").value = S.gcap;
+    }
   }
   function save() { try { localStorage.setItem(KEY(), JSON.stringify(S)); } catch (e) {} }
 
   // ---------- scoring ----------
   function evaluate(r) {
     const ev = {};
+    if (isStock()) { const v = dcf(r); r = { ...r, iv: v ? v.iv : null, dcfg: v ? v.g : null, mos: v ? v.mos : null }; }
     for (const t of P.tests) {
       const m = META[t.k], v = r[t.k], T = S[t.k];
       if (v == null) { ev[t.k] = { pass: false, s: 0, na: true }; continue; }
       if (m.valid && !m.valid(v)) { ev[t.k] = { pass: false, s: 0 }; continue; }
       const x = m.unit(v);
-      let pass = t.dir === "lt" ? x < T : x > T;
-      const s = t.dir === "lt" ? (x <= 0.5 * T ? 1 : clamp((1.5 * T - x) / T)) : clamp((x - T / 3) / (T * 1.67 - T / 3));
+      let pass = t.dir === "lt" ? x < T : t.dir === "ge" ? x >= T : x > T;
+      const s = m.range ? clamp((x - m.range[0]) / (m.range[1] - m.range[0]))
+        : t.dir === "lt" ? (x <= 0.5 * T ? 1 : clamp((1.5 * T - x) / T)) : clamp((x - T / 3) / (T * 1.67 - T / 3));
       const e = { pass, s };
       if (t.k === "pe" && isStock()) {
         e.secMed = DATA.medians[r.sec] ?? DATA.medians._market;
@@ -187,10 +234,12 @@
       const byT = new Map(DATA.rows.map(x => [x.t, x]));
       for (const [t, m] of Object.entries(DATA.prev.rows)) {
         const cur = byT.get(t);
-        if (cur && inUniverse(cur) && evaluate({ ...cur, ...m }).passes === 5) prevPass.add(t);
+        // older scans may lack newer fields; only override what the previous scan actually had
+        const old = Object.fromEntries(Object.entries(m).filter(([, v]) => v != null));
+        if (cur && inUniverse(cur) && evaluate({ ...cur, ...old }).passes === P.tests.length) prevPass.add(t);
       }
     }
-    ranked.forEach(r => r.isNew = !!DATA.prev && r.passes === 5 && !prevPass.has(r.t));
+    ranked.forEach(r => r.isNew = !!DATA.prev && r.passes === P.tests.length && !prevPass.has(r.t));
   }
 
   // ---------- render ----------
@@ -198,11 +247,11 @@
   const chipMuted = txt => `<span class="chip" style="background:var(--track);color:var(--muted)">${txt}</span>`;
 
   function renderSummary() {
-    const all5 = ranked.filter(r => r.passes === 5).length, four = ranked.filter(r => r.passes === 4).length;
+    const N = P.tests.length, all5 = ranked.filter(r => r.passes === N).length, four = ranked.filter(r => r.passes === N - 1).length;
     const zone = ranked.filter(r => r.passes >= CFG.minPasses && r.nearLow).length;
     $("summary").innerHTML = `
-      <div class="stat${all5 ? " hot" : ""}"><div class="eyebrow">Pass all 5</div><div class="v">${all5}</div><div class="s">full matches</div></div>
-      <div class="stat"><div class="eyebrow">Pass 4 of 5</div><div class="v">${four}</div><div class="s">near misses</div></div>
+      <div class="stat${all5 ? " hot" : ""}"><div class="eyebrow">Pass all ${N}</div><div class="v">${all5}</div><div class="s">full matches</div></div>
+      <div class="stat"><div class="eyebrow">Pass ${N - 1} of ${N}</div><div class="v">${four}</div><div class="s">near misses</div></div>
       <div class="stat${zone ? " hot" : ""}"><div class="eyebrow">In buy zone</div><div class="v">${zone}</div><div class="s">near 52-week low</div></div>
       <div class="stat"><div class="eyebrow">Screened</div><div class="v">${ranked.length.toLocaleString()}</div><div class="s">${isStock() ? (P.universe === "bc" ? "S&amp;P 100 + Dow 30" : "of " + DATA.universe.toLocaleString() + " in the S&amp;P 1500") : "equity ETFs"}</div></div>`;
   }
@@ -224,6 +273,7 @@
     let h = "";
     if (r.isNew) h += `<span class="chip new">New</span>`;
     if (r.nearLow) h += `<span class="chip new">Near 52-wk low</span>`;
+    if (r.mos != null && r.mos >= 0.25 && !P.tests.some(t => t.k === "mos")) h += `<span class="chip">${pct(r.mos, 0)} below DCF value</span>`;
     if (r.warn.length) h += `<span class="chip warn">Check data: ${r.warn.join(", ")}</span>`;
     return h;
   }
@@ -233,10 +283,10 @@
     : chipMuted(`${esc(r.cat || r.grp)} · 3-yr ${pct(r.r3, 1)}`);
 
   function renderPicks() {
-    const top = ranked.filter(r => r.passes === 5).slice(0, 9);
-    const pool = top.length ? top : ranked.filter(r => r.passes === 4).slice(0, 6);
+    const N = P.tests.length, top = ranked.filter(r => r.passes === N).slice(0, 9);
+    const pool = top.length ? top : ranked.filter(r => r.passes === N - 1).slice(0, 6);
     if (!pool.length) { $("picks").innerHTML = `<div class="empty">Nothing passes four or more tests at these thresholds. Loosen a criterion on the left.</div>`; return; }
-    const note = top.length ? "" : `<div class="empty" style="grid-column:1/-1">Nothing passes all five tests right now. Showing the best near misses (4 of 5).</div>`;
+    const note = top.length ? "" : `<div class="empty" style="grid-column:1/-1">Nothing passes all ${N} tests right now. Showing the best near misses (${N - 1} of ${N}).</div>`;
     $("picks").innerHTML = note + pool.map(r => `
       <button class="pick" type="button" data-t="${esc(r.t)}">
         <div class="pick-top"><div><div class="tick">${esc(r.t)}</div><div class="pname">${sub(r)}</div></div>
@@ -251,7 +301,7 @@
     if (!z.length) { $("zone").innerHTML = `<div class="empty">Nothing passing ${CFG.minPasses}+ tests is within ${S.low}% of its 52-week low right now.</div>`; return; }
     $("zone").innerHTML = z.map(r => `
       <button class="pick" type="button" data-t="${esc(r.t)}">
-        <div class="pick-top"><div><div class="tick">${esc(r.t)}</div><div class="pname">${sub(r)} · ${r.passes}/5 tests</div></div>
+        <div class="pick-top"><div><div class="tick">${esc(r.t)}</div><div class="pname">${sub(r)} · ${r.passes}/${P.tests.length} tests</div></div>
           <div class="score">+${(r.fromLow * 100).toFixed(1)}%<small>above low</small></div></div>
         <div class="range"><span class="mono">$${fx(r.lo52)}</span><div class="rtrack"><i style="left:${(r.rangePos ?? 0) * 100}%"></i></div><span class="mono">$${fx(r.hi52)}</span></div>
         <div class="chips">${chipMuted(`Price $${fx(r.px)} · score ${r.score}`)}${r.warn.length ? `<span class="chip warn">Check data</span>` : ""}</div>
@@ -265,7 +315,7 @@
       if (e.na) txt = "No data.";
       else if (m.bad && m.bad(r)) txt = m.bad(r);
       else {
-        txt = `${m.show(r)} vs ${t.dir === "lt" ? "limit" : "bar"} ${S[t.k]}${m.sfx === "×" ? "×" : " " + m.sfx}.`;
+        txt = `${m.show(r)} vs ${t.dir === "lt" ? "limit" : "bar"} ${S[t.k]}${["×", "%"].includes(m.sfx) ? m.sfx : " " + m.sfx}.`;
         if (t.k === "pe" && isStock()) txt += ` Sector median ${fx(e.secMed, 1)}×${S.sector && !e.underSec ? " (above it)" : ""}.`;
         if (t.k === "peg" && r.pegs === "calc") txt += " Calculated from trailing growth.";
       }
@@ -275,9 +325,19 @@
       ? `<span>${esc(r.ind)}</span><span>Price $${fx(r.px)}</span><span>Fwd P/E ${fx(r.fpe, 1)}</span>
          <span>Earnings growth ${pct(r.eg, 0)}</span><span>Revenue growth ${pct(r.rg, 0)}</span><span>ROE ${pct(r.roe, 0)}</span>
          <span>Div. yield ${r.dy == null ? "—" : r.dy.toFixed(2) + "%"}</span><span>${esc(r.idx)}</span>`
+      + `<span>Analyst target ${r.up == null ? "—" : (r.up >= 0 ? "+" : "") + (r.up * 100).toFixed(0) + "%"}</span>`
       : `<span>${esc(r.fam)}</span><span>${esc(r.grp)}</span><span>Price $${fx(r.px)}</span><span>3-yr ${pct(r.r3, 1)}/yr</span>
          <span>YTD ${r.ytd == null ? "—" : r.ytd.toFixed(1) + "%"}</span><span>Beta ${fx(r.beta)}</span>`;
-    return `<div class="why">${lines}</div>
+    const dcfTxt = !isStock() ? "" : r.iv == null || r.iv <= 0
+      ? `<p class="dcf">${META.mos.bad(r) || "DCF not available (missing free cash flow or share count)."}</p>`
+      : `<p class="dcf"><b>DCF intrinsic value $${fx(r.iv)}</b> a share vs price $${fx(r.px)}: ${r.mos >= 0 ? pct(r.mos, 0) + " margin of safety" : pct(-r.mos, 0) + " above value"}.
+         Built from ${money(r.fcf0)} average free cash flow, growing ${pct(r.dcfg, 1)} a year for 5 years then fading to ${S.term}%, discounted at ${S.disc}%, plus ${r.netcash >= 0 ? "net cash" : "net debt of"} ${money(Math.abs(r.netcash))}.</p>`;
+    const hist = !isStock() || !r.h || !r.h.y.length ? "" : `<div class="hist"><table><thead><tr><th>Year</th>${r.h.y.map(y => `<th class="r">${y}</th>`).join("")}</tr></thead><tbody>
+      <tr><td>ROE</td>${r.h.roe.map(v => `<td class="n${v != null && v >= 0.15 ? " ok" : ""}">${pct(v, 0)}</td>`).join("")}</tr>
+      <tr><td>Net margin</td>${r.h.nm.map(v => `<td class="n">${pct(v, 1)}</td>`).join("")}</tr>
+      <tr><td>Free cash flow</td>${r.h.fcf.map(v => `<td class="n${v != null && v < 0 ? " bad" : ""}">${money(v)}</td>`).join("")}</tr>
+      </tbody></table></div>`;
+    return `<div class="why">${lines}</div>${dcfTxt}${hist}
       <div class="extra">${extra}<span>52-wk range $${fx(r.lo52)}–$${fx(r.hi52)}</span>
         <a href="https://finance.yahoo.com/quote/${encodeURIComponent(r.t)}" target="_blank" rel="noopener">Yahoo Finance ↗</a></div>`;
   }
@@ -291,9 +351,9 @@
       return (typeof x === "string" ? x.localeCompare(y) : x - y) * sortDir;
     });
     document.querySelectorAll("th[data-k]").forEach(th => th.classList.toggle("sorted", th.dataset.k === sortK));
-    const ncol = 8 + P.tests.length;
+    const ncol = 7 + P.tests.length + (isStock() ? (P.tests.some(t => t.k === "mos") ? 2 : 3) : 2);
     const extraTd = r => isStock()
-      ? `<td class="n">${r.up == null ? "—" : (r.up >= 0 ? "+" : "") + (r.up * 100).toFixed(0) + "%"}</td><td class="n">${money(r.mc)}</td>`
+      ? `${P.tests.some(t => t.k === "mos") ? "" : `<td class="n${r.mos >= 0.25 ? " ok" : ""}">${META.mos.show(r)}</td>`}<td class="n">${r.iv == null ? "—" : "$" + fx(r.iv)}</td><td class="n">${money(r.mc)}</td>`
       : `<td class="n">${pct(r.r3, 1)}</td><td class="n">${fx(r.beta)}</td>`;
     $("tb").innerHTML = rows.slice(0, shown).map(r => `<tr class="main" data-t="${esc(r.t)}" tabindex="0">
         <td class="n">${r.rank}</td>
@@ -351,8 +411,8 @@
     for (const t of P.tests) num("t-" + t.k, t.k);
     num("o-low", "low");
     if (isStock()) {
-      num("o-mcap", "mcap");
-      $("o-sector").addEventListener("change", e => { S.sector = e.target.checked; save(); renderAll(); });
+      num("o-mcap", "mcap"); num("o-disc", "disc"); num("o-term", "term"); num("o-gcap", "gcap");
+      if ($("o-sector")) $("o-sector").addEventListener("change", e => { S.sector = e.target.checked; save(); renderAll(); });
       $("o-fin").addEventListener("change", e => { S.fin = e.target.checked; save(); renderAll(); });
     }
     $("reset").addEventListener("click", () => { S = { ...DEF }; save(); syncInputs(); renderAll(); });

@@ -6,7 +6,7 @@
       "file": "index.html",
       "nav": "Value screen",
       "title": "Value Quality Scanner",
-      "eyebrow": "S&P 1500 · value + quality screen",
+      "eyebrow": "S&P 1500 \u00b7 value + quality screen",
       "intro": "Ranks every stock in the S&P 500, 400 and 600 on five tests: PEG, debt-to-equity, ROIC, free-cash-flow yield and P/E. Change any threshold and the board re-scores instantly.",
       "kind": "stock",
       "data": "scan.json",
@@ -15,18 +15,78 @@
       "minCapB": 0.3,
       "sectorPE": true,
       "tests": [
-        {"k": "peg", "dir": "lt", "t": 1.0},
-        {"k": "de", "dir": "lt", "t": 0.5},
-        {"k": "roic", "dir": "gt", "t": 15},
-        {"k": "fcfy", "dir": "gt", "t": 6},
-        {"k": "pe", "dir": "lt", "t": 15}
+        {
+          "k": "peg",
+          "dir": "lt",
+          "t": 1.0
+        },
+        {
+          "k": "de",
+          "dir": "lt",
+          "t": 0.5
+        },
+        {
+          "k": "roic",
+          "dir": "gt",
+          "t": 15
+        },
+        {
+          "k": "fcfy",
+          "dir": "gt",
+          "t": 6
+        },
+        {
+          "k": "pe",
+          "dir": "lt",
+          "t": 15
+        }
+      ]
+    },
+    "buffett": {
+      "file": "buffett.html",
+      "nav": "Buffett",
+      "title": "Buffett Moat Screen",
+      "eyebrow": "S&P 1500 \u00b7 consistent returns, low debt, margin of safety",
+      "intro": "Warren Buffett's checklist: ROE of 15%+ every year, debt the business could repay from a few years of profit, widening margins, cash flow every year, and a price well below a discounted-cash-flow estimate of intrinsic value.",
+      "kind": "stock",
+      "data": "scan.json",
+      "universe": "all",
+      "excludeFin": true,
+      "minCapB": 1,
+      "sectorPE": false,
+      "tests": [
+        {
+          "k": "roemin",
+          "dir": "gt",
+          "t": 15
+        },
+        {
+          "k": "dny",
+          "dir": "lt",
+          "t": 3
+        },
+        {
+          "k": "mgr",
+          "dir": "gt",
+          "t": 0
+        },
+        {
+          "k": "fcfc",
+          "dir": "ge",
+          "t": 100
+        },
+        {
+          "k": "mos",
+          "dir": "gt",
+          "t": 25
+        }
       ]
     },
     "bluechip": {
       "file": "bluechips.html",
       "nav": "Blue chips",
       "title": "Blue Chip Board",
-      "eyebrow": "S&P 100 + Dow 30 · quality at a fair price",
+      "eyebrow": "S&P 100 + Dow 30 \u00b7 quality at a fair price",
       "intro": "The largest, most established US companies, scored on the same five tests with thresholds sized for mega-caps, which rarely trade at small-cap multiples.",
       "kind": "stock",
       "data": "scan.json",
@@ -35,11 +95,31 @@
       "minCapB": 0,
       "sectorPE": false,
       "tests": [
-        {"k": "peg", "dir": "lt", "t": 2.0},
-        {"k": "de", "dir": "lt", "t": 1.0},
-        {"k": "roic", "dir": "gt", "t": 15},
-        {"k": "fcfy", "dir": "gt", "t": 4},
-        {"k": "pe", "dir": "lt", "t": 25}
+        {
+          "k": "peg",
+          "dir": "lt",
+          "t": 2.0
+        },
+        {
+          "k": "de",
+          "dir": "lt",
+          "t": 1.0
+        },
+        {
+          "k": "roic",
+          "dir": "gt",
+          "t": 15
+        },
+        {
+          "k": "fcfy",
+          "dir": "gt",
+          "t": 4
+        },
+        {
+          "k": "pe",
+          "dir": "lt",
+          "t": 25
+        }
       ]
     },
     "etf": {
@@ -52,12 +132,37 @@
       "data": "etfs.json",
       "universe": "all",
       "tests": [
-        {"k": "er", "dir": "lt", "t": 0.20},
-        {"k": "aum", "dir": "gt", "t": 1},
-        {"k": "pe", "dir": "lt", "t": 22},
-        {"k": "r5", "dir": "gt", "t": 10},
-        {"k": "yld", "dir": "gt", "t": 1.5}
+        {
+          "k": "er",
+          "dir": "lt",
+          "t": 0.2
+        },
+        {
+          "k": "aum",
+          "dir": "gt",
+          "t": 1
+        },
+        {
+          "k": "pe",
+          "dir": "lt",
+          "t": 22
+        },
+        {
+          "k": "r5",
+          "dir": "gt",
+          "t": 10
+        },
+        {
+          "k": "yld",
+          "dir": "gt",
+          "t": 1.5
+        }
       ]
     }
+  },
+  "dcf": {
+    "disc": 10,
+    "term": 2.5,
+    "gcap": 15
   }
 }
