@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+history/
+*.log
+!alerts.log
+launchd.log
+scan.log
