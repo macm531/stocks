@@ -7,18 +7,18 @@
       "nav": "Value screen",
       "title": "Value Quality Scanner",
       "eyebrow": "S&P 1500 \u00b7 value + quality screen",
-      "intro": "Ranks every stock in the S&P 500, 400 and 600 on five tests: PEG, debt-to-equity, ROIC, free-cash-flow yield and P/E. Change any threshold and the board re-scores instantly.",
+      "intro": "Ranks the S&P 500, 400 and 600 on five tests: PEG, debt-to-equity, ROIC, free-cash-flow yield and P/E. Valuation bars are set for steady compounders, which rarely trade at deep-value multiples; debt and ROIC stay strict. Change any threshold and the board re-scores instantly.",
       "kind": "stock",
       "data": "scan.json",
       "universe": "all",
       "excludeFin": true,
       "minCapB": 0.3,
-      "sectorPE": true,
+      "sectorPE": false,
       "tests": [
         {
           "k": "peg",
           "dir": "lt",
-          "t": 1.0
+          "t": 2.0
         },
         {
           "k": "de",
@@ -33,12 +33,12 @@
         {
           "k": "fcfy",
           "dir": "gt",
-          "t": 6
+          "t": 4
         },
         {
           "k": "pe",
           "dir": "lt",
-          "t": 15
+          "t": 25
         }
       ]
     },
