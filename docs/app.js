@@ -78,6 +78,11 @@
   let CFG, P, PID = window.PAGE_ID, DATA = null, ranked = [], S = {}, DEF = {};
   let sortK = null, sortDir = -1, shown = 60, open = new Set(), baseCount = 0;
   const KEY = () => "vqs-settings-" + PID;
+  // Tests the viewer has switched on; everything that counts passes uses these.
+  const on = t => !(S.off && S.off[t.k]);
+  const AT = () => P.tests.filter(on);
+  const NT = () => AT().length;
+  const zmin = () => Math.min(CFG.minPasses, NT());
   const isStock = () => P.kind === "stock";
 
   // ---------- layout ----------
@@ -86,8 +91,8 @@
     const nav = Object.entries(CFG.pages).map(([id, p]) =>
       `<a class="tab" href="${p.file}"${id === PID ? ' aria-current="page"' : ""}>${esc(p.nav)}</a>`).join("");
     const crit = P.tests.map(t => { const m = META[t.k]; return `
-      <div class="crit">
-        <div class="crit-top"><label for="t-${t.k}">${m.title}</label><span class="cnt" id="c-${t.k}"></span></div>
+      <div class="crit" id="crit-${t.k}">
+        <div class="crit-top"><label class="sw"><input type="checkbox" id="on-${t.k}" aria-label="Use ${m.title}"><i></i><span>${m.title}</span></label><span class="cnt" id="c-${t.k}"></span></div>
         <div class="field"><input id="t-${t.k}" type="number" step="${m.step}" min="0"><span>${m.sfx}</span></div>
         ${t.k === "pe" && isStock() ? `<label class="opt"><input id="o-sector" type="checkbox"> Also below its sector's median P/E</label>` : ""}
         <small>${m.hint}</small>
@@ -119,22 +124,23 @@
     </div>
     <div class="runbox">
       <div class="stamp" id="stamp">Loading latest scan…</div>
+      <button class="ghost" id="toggle-settings" type="button" aria-controls="rail"></button>
       <button class="run" id="run" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
         Run scan
       </button>
     </div>
   </header>
-  <div class="desk">
-    <aside class="rail" aria-label="Screening criteria">
+  <div class="desk" id="desk">
+    <aside class="rail" id="rail" aria-label="Screening settings">
       <div class="eyebrow">Chart shape</div>
-      <label class="opt"><input id="o-trend" type="checkbox"> <span><b>Only steady uptrends</b><br><span style="color:var(--muted)">5-year charts that climb up and to the right</span></span></label>
-      <div class="crit">
+      <label class="sw"><input id="o-trend" type="checkbox"><i></i><span><b>Only steady uptrends</b><br><span style="color:var(--muted);font-weight:400">5-year charts that climb up and to the right</span></span></label>
+      <div class="crit" id="crit-trend">
         <div class="crit-top"><label for="o-r2">Trend steadiness at least</label><span class="cnt" id="c-trend"></span></div>
         <div class="field"><input id="o-r2" type="number" step="0.05" min="0" max="1"><span>R² (0–1)</span></div>
         <small>How closely the 5-year price follows a straight rising line on a log scale. NVDA and CAT score about 0.88; a choppy sideways chart scores under 0.5.</small>
       </div>
-      <div class="crit">
+      <div class="crit" id="crit-trend2">
         <label for="o-cagr">5-year price growth at least</label>
         <div class="field"><input id="o-cagr" type="number" step="1"><span>% a year</span></div>
       </div>
@@ -143,12 +149,12 @@
       ${crit}
       <hr>
       ${stockOpts}
-      <div class="crit">
-        <div class="crit-top"><label for="o-zmode">Buy zone</label><span class="cnt" id="c-low"></span></div>
+      <div class="crit" id="crit-zone">
+        <div class="crit-top"><label class="sw"><input type="checkbox" id="o-zone" aria-label="Use buy zone"><i></i><span>Buy zone</span></label><span class="cnt" id="c-low"></span></div>
         <select id="o-zmode" class="zsel"><option value="pullback">Pullback from 52-week high</option><option value="low">Near 52-week low</option></select>
         <div class="field" id="zone-pull"><input id="o-pull" type="number" step="1" min="0"><span>to</span><input id="o-pullmax" type="number" step="5" min="0"><span>% below the high</span></div>
         <div class="field" id="zone-low"><input id="o-low" type="number" step="1" min="0"><span>% or less above the low</span></div>
-        <small>Picks passing ${CFG.minPasses}+ tests that are in this zone show in the buy zone. Email alerts use the default settings.</small>
+        <small>Picks passing ${CFG.minPasses}+ of the tests you have on (or all of them, if fewer are on) that are in this zone show in the buy zone. Email alerts always use the default settings.</small>
       </div>
       <button class="reset" id="reset" type="button">Reset to defaults</button>
     </aside>
@@ -160,7 +166,7 @@
         <div class="picks" id="zone"></div>
       </section>
       <section class="block">
-        <div class="bhead"><div><h2>Top picks</h2><p>Passing all ${P.tests.length} tests, best composite score first.</p></div></div>
+        <div class="bhead"><div><h2>Top picks</h2><p id="picks-desc"></p></div></div>
         <div class="picks" id="picks"></div>
       </section>
       <section class="block">
@@ -170,7 +176,7 @@
             <input id="q" type="search" placeholder="Search ticker or name" aria-label="Search ticker or name">
             <select id="minp" aria-label="Minimum tests passed">
               <option value="0">All</option><option value="3">3+ tests passed</option>
-              <option value="4">4+ tests passed</option><option value="${P.tests.length}">All ${P.tests.length} passed</option>
+              <option value="4">4+ tests passed</option><option value="5">All 5 passed</option>
             </select>
             <select id="sec" aria-label="Group"></select>
           </div>
@@ -194,13 +200,25 @@
 
   // ---------- settings ----------
   function defaults() {
-    const d = { low: CFG.lowPct, trendOn: CFG.trend.on, r2: CFG.trend.r2, cagr: CFG.trend.cagr, zmode: CFG.zone.mode, pull: CFG.zone.pullback, pullMax: CFG.zone.pullbackMax };
+    const d = { off: {}, zoneOn: true, showSettings: true, low: CFG.lowPct, trendOn: CFG.trend.on, r2: CFG.trend.r2, cagr: CFG.trend.cagr, zmode: CFG.zone.mode, pull: CFG.zone.pullback, pullMax: CFG.zone.pullbackMax };
     for (const t of P.tests) d[t.k] = t.t;
     if (isStock()) Object.assign(d, { sector: !!P.sectorPE, fin: !!P.excludeFin, mcap: P.minCapB || 0, ...CFG.dcf });
     return d;
   }
   function syncInputs() {
-    for (const t of P.tests) $("t-" + t.k).value = S[t.k];
+    for (const t of P.tests) {
+      $("t-" + t.k).value = S[t.k];
+      $("on-" + t.k).checked = on(t);
+      $("t-" + t.k).disabled = !on(t);
+      $("crit-" + t.k).classList.toggle("off", !on(t));
+    }
+    $("o-zone").checked = S.zoneOn;
+    $("crit-zone").classList.toggle("off", !S.zoneOn);
+    ["crit-trend", "crit-trend2"].forEach(id => $(id).classList.toggle("off", !S.trendOn));
+    $("o-r2").disabled = $("o-cagr").disabled = !S.trendOn;
+    $("desk").classList.toggle("nosettings", !S.showSettings);
+    $("toggle-settings").textContent = S.showSettings ? "Hide settings" : "Show settings";
+    $("toggle-settings").setAttribute("aria-expanded", S.showSettings);
     $("o-low").value = S.low; $("o-pull").value = S.pull; $("o-pullmax").value = S.pullMax; $("o-zmode").value = S.zmode;
     $("o-trend").checked = S.trendOn; $("o-r2").value = S.r2; $("o-cagr").value = S.cagr;
     $("zone-low").hidden = S.zmode !== "low"; $("zone-pull").hidden = S.zmode !== "pullback";
@@ -232,8 +250,9 @@
       }
       ev[t.k] = e;
     }
-    const passes = P.tests.filter(t => ev[t.k].pass).length;
-    const score = Math.round(P.tests.reduce((a, t) => a + ev[t.k].s, 0) / P.tests.length * 100);
+    const act = AT();
+    const passes = act.filter(t => ev[t.k].pass).length;
+    const score = act.length ? Math.round(act.reduce((a, t) => a + ev[t.k].s, 0) / act.length * 100) : 0;
     const warn = [];
     if (r.peg != null && r.peg > 0 && r.peg < 0.2) warn.push("PEG");
     if (r.fcfy != null && r.fcfy > 0.25) warn.push("FCF");
@@ -245,7 +264,7 @@
       up: r.tgt && r.px ? r.tgt / r.px - 1 : null,
       rangePos: r.lo52 && r.hi52 && r.hi52 > r.lo52 && r.px ? clamp((r.px - r.lo52) / (r.hi52 - r.lo52)) : null,
       fromHigh,
-      nearLow: S.zmode === "low" ? fromLow != null && fromLow <= S.low / 100 : fromHigh != null && fromHigh <= -S.pull / 100 && fromHigh >= -S.pullMax / 100 };
+      nearLow: !S.zoneOn ? false : S.zmode === "low" ? fromLow != null && fromLow <= S.low / 100 : fromHigh != null && fromHigh <= -S.pull / 100 && fromHigh >= -S.pullMax / 100 };
   }
 
   const steady = r => r.r2 != null && r.r2 >= S.r2 && r.cagr5 != null && r.cagr5 * 100 >= S.cagr;
@@ -268,10 +287,10 @@
         const cur = byT.get(t);
         // older scans may lack newer fields; only override what the previous scan actually had
         const old = Object.fromEntries(Object.entries(m).filter(([, v]) => v != null));
-        if (cur && inUniverse(cur) && evaluate({ ...cur, ...old }).passes === P.tests.length) prevPass.add(t);
+        if (cur && inUniverse(cur) && evaluate({ ...cur, ...old }).passes === NT()) prevPass.add(t);
       }
     }
-    ranked.forEach(r => r.isNew = !!DATA.prev && r.passes === P.tests.length && !prevPass.has(r.t));
+    ranked.forEach(r => r.isNew = !!DATA.prev && NT() > 0 && r.passes === NT() && !prevPass.has(r.t));
   }
 
   // ---------- render ----------
@@ -279,8 +298,8 @@
   const chipMuted = txt => `<span class="chip" style="background:var(--track);color:var(--muted)">${txt}</span>`;
 
   function renderSummary() {
-    const N = P.tests.length, all5 = ranked.filter(r => r.passes === N).length, four = ranked.filter(r => r.passes === N - 1).length;
-    const zone = ranked.filter(r => r.passes >= CFG.minPasses && r.nearLow).length;
+    const N = NT(), all5 = ranked.filter(r => r.passes === N).length, four = ranked.filter(r => r.passes === N - 1).length;
+    const zone = ranked.filter(r => r.passes >= zmin() && r.nearLow).length;
     $("summary").innerHTML = `
       <div class="stat${all5 ? " hot" : ""}"><div class="eyebrow">Pass all ${N}</div><div class="v">${all5}</div><div class="s">full matches</div></div>
       <div class="stat"><div class="eyebrow">Pass ${N - 1} of ${N}</div><div class="v">${four}</div><div class="s">near misses</div></div>
@@ -293,17 +312,17 @@
     const row = (name, n) => `<div class="frow"><span>${name}</span><div class="ftrack"><div class="fbar" style="width:${Math.max(n ? 0.6 : 0, n / max * 100)}%"></div></div><span class="num">${n}</span></div>`;
     if (S.trendOn) html += row(isStock() ? "Universe" : "All funds", baseCount);
     $("c-trend").textContent = S.trendOn ? ranked.length + " steady" : "off";
-    const steps = [[S.trendOn ? "Steady uptrend" : (isStock() ? "Universe" : "All funds"), () => true], ...P.tests.map((t, i) => [(i ? "+ " : "") + META[t.k].title.replace(/ (below|above)$/, ""), r => r.ev[t.k].pass])];
+    const steps = [[S.trendOn ? "Steady uptrend" : (isStock() ? "Universe" : "All funds"), () => true], ...AT().map((t, i) => [(i ? "+ " : "") + META[t.k].title.replace(/ (below|above)$/, ""), r => r.ev[t.k].pass])];
     for (const [name, f] of steps) {
       set = set.filter(f);
       html += row(name, set.length);
     }
     $("funnel").innerHTML = html;
-    for (const t of P.tests) $("c-" + t.k).textContent = ranked.filter(r => r.ev[t.k].pass).length + " pass";
+    for (const t of P.tests) $("c-" + t.k).textContent = on(t) ? ranked.filter(r => r.ev[t.k].pass).length + " pass" : "off";
     $("c-low").textContent = ranked.filter(r => r.nearLow).length + " near";
   }
 
-  const mgrid = r => `<div class="mgrid">${P.tests.map(t => `<div class="m ${cls(r.ev[t.k])}"><b>${META[t.k].label}</b><span>${META[t.k].show(r)}</span></div>`).join("")}</div>`;
+  const mgrid = r => `<div class="mgrid">${P.tests.map(t => `<div class="m ${on(t) ? cls(r.ev[t.k]) : "na off"}"><b>${META[t.k].label}</b><span>${META[t.k].show(r)}</span></div>`).join("")}</div>`;
   function chips(r) {
     let h = "";
     if (r.isNew) h += `<span class="chip new">New</span>`;
@@ -318,7 +337,10 @@
     : chipMuted(`${esc(r.cat || r.grp)} · 3-yr ${pct(r.r3, 1)}`);
 
   function renderPicks() {
-    const N = P.tests.length, top = ranked.filter(r => r.passes === N).slice(0, 9);
+    const N = NT();
+    $("picks-desc").textContent = N ? `Passing all ${N} tests you have on, best composite score first.` : "Every test is off. Switch at least one on in the settings.";
+    if (!N) { $("picks").innerHTML = ""; return; }
+    const top = ranked.filter(r => r.passes === N).slice(0, 9);
     const pool = top.length ? top : ranked.filter(r => r.passes === N - 1).slice(0, 6);
     if (!pool.length) { $("picks").innerHTML = `<div class="empty">Nothing passes four or more tests at these thresholds. Loosen a criterion on the left.</div>`; return; }
     const note = top.length ? "" : `<div class="empty" style="grid-column:1/-1">Nothing passes all ${N} tests right now. Showing the best near misses (${N - 1} of ${N}).</div>`;
@@ -334,11 +356,12 @@
 
   function renderZone() {
     const pb = S.zmode === "pullback";
-    const z = ranked.filter(r => r.passes >= CFG.minPasses && r.nearLow).sort((a, b) => pb ? b.score - a.score : a.fromLow - b.fromLow);
-    if (!z.length) { $("zone").innerHTML = `<div class="empty">Nothing passing ${CFG.minPasses}+ tests is ${pb ? `${S.pull}–${S.pullMax}% below its 52-week high` : `within ${S.low}% of its 52-week low`} right now.</div>`; return; }
+    if (!S.zoneOn) { $("zone").innerHTML = `<div class="empty">The buy zone is off. Switch it on in the settings.</div>`; return; }
+    const z = ranked.filter(r => r.passes >= zmin() && r.nearLow).sort((a, b) => pb ? b.score - a.score : a.fromLow - b.fromLow);
+    if (!z.length) { $("zone").innerHTML = `<div class="empty">Nothing passing ${zmin()}+ tests is ${pb ? `${S.pull}–${S.pullMax}% below its 52-week high` : `within ${S.low}% of its 52-week low`} right now.</div>`; return; }
     $("zone").innerHTML = z.map(r => `
       <button class="pick" type="button" data-t="${esc(r.t)}">
-        <div class="pick-top"><div><div class="tick">${esc(r.t)}</div><div class="pname">${sub(r)} · ${r.passes}/${P.tests.length} tests</div></div>
+        <div class="pick-top"><div><div class="tick">${esc(r.t)}</div><div class="pname">${sub(r)} · ${r.passes}/${NT()} tests</div></div>
           <div class="score">${pb ? (r.fromHigh * 100).toFixed(1) + "%<small>from high</small>" : "+" + (r.fromLow * 100).toFixed(1) + "%<small>above low</small>"}</div></div>
         <div class="sparkrow">${spark(r, 220, 40)}<span>${trendTxt(r)}</span></div>
         <div class="range"><span class="mono">$${fx(r.lo52)}</span><div class="rtrack"><i style="left:${(r.rangePos ?? 0) * 100}%"></i></div><span class="mono">$${fx(r.hi52)}</span></div>
@@ -357,6 +380,7 @@
         if (t.k === "pe" && isStock()) txt += ` Sector median ${fx(e.secMed, 1)}×${S.sector && !e.underSec ? " (above it)" : ""}.`;
         if (t.k === "peg" && r.pegs === "calc") txt += " Calculated from trailing growth.";
       }
+      if (!on(t)) return `<div class="na off"><b>Off · ${m.title.replace(/ (below|above)$/, "")}</b>${m.show(r)} (not counted)</div>`;
       return `<div class="${cls(e)}"><b>${e.na ? "No data" : e.pass ? "Pass" : "Fail"} · ${m.title.replace(/ (below|above)$/, "")}</b>${txt}</div>`;
     }).join("");
     const extra = isStock()
@@ -398,9 +422,9 @@
         <td class="n">${r.rank}</td>
         <td><span class="tk">${esc(r.t)}</span> <span class="nm">${esc(r.n)}</span> ${r.isNew ? '<span class="chip new">New</span>' : ""}${r.warn.length ? ' <span class="chip warn">check</span>' : ""}</td>
         <td>${esc(r.grp)}</td>
-        <td class="n"><span class="dots">${P.tests.map(t => `<i class="${r.ev[t.k].pass ? "on" : ""}"></i>`).join("")}</span></td>
+        <td class="n"><span class="dots">${AT().map(t => `<i class="${r.ev[t.k].pass ? "on" : ""}"></i>`).join("")}</span></td>
         <td class="n">${r.score}<span class="bar"><i style="width:${r.score}%"></i></span></td>
-        ${P.tests.map(t => `<td class="n ${cls(r.ev[t.k])}">${META[t.k].show(r)}</td>`).join("")}
+        ${P.tests.map(t => `<td class="n ${on(t) ? cls(r.ev[t.k]) : "na"}">${META[t.k].show(r)}</td>`).join("")}
         <td class="trendcell">${spark(r)}<small>${trendTxt(r)}</small></td>
         <td class="n${r.nearLow ? " ok" : ""}">${r.fromLow == null ? "—" : "+" + (r.fromLow * 100).toFixed(1) + "%"}${r.rangePos == null ? "" : `<span class="bar" title="Position in 52-week range"><i style="width:${Math.max(3, r.rangePos * 100)}%"></i></span>`}</td>
         ${extraTd(r)}</tr>` + (open.has(r.t) ? `<tr class="detail"><td colspan="${ncol}">${why(r)}</td></tr>` : "")).join("")
@@ -409,7 +433,14 @@
     $("more").textContent = `Show more (${rows.length - shown} left)`;
   }
 
-  function renderAll() { rankAll(); renderSummary(); renderFunnel(); renderZone(); renderPicks(); renderTable(); }
+  function minpOptions() {
+    const N = NT(), cur = $("minp").value;
+    const opts = [["0", "All"]];
+    for (let k = Math.max(1, N - 2); k < N; k++) opts.push([String(k), `${k}+ tests passed`]);
+    if (N) opts.push([String(N), `All ${N} passed`]);
+    $("minp").innerHTML = opts.map(([v, l]) => `<option value="${v}"${v === cur ? " selected" : ""}>${l}</option>`).join("");
+  }
+  function renderAll() { minpOptions(); rankAll(); renderSummary(); renderFunnel(); renderZone(); renderPicks(); renderTable(); }
 
   function stamp() {
     const fmt = x => new Date(x).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
@@ -448,16 +479,21 @@
 
   function wire() {
     const num = (id, k) => $(id).addEventListener("input", e => { const v = parseFloat(e.target.value); if (isNaN(v)) return; S[k] = v; save(); if (DATA) renderAll(); });
-    for (const t of P.tests) num("t-" + t.k, t.k);
+    for (const t of P.tests) {
+      num("t-" + t.k, t.k);
+      $("on-" + t.k).addEventListener("change", e => { S.off = { ...S.off, [t.k]: !e.target.checked }; save(); syncInputs(); renderAll(); });
+    }
+    $("o-zone").addEventListener("change", e => { S.zoneOn = e.target.checked; save(); syncInputs(); renderAll(); });
+    $("toggle-settings").addEventListener("click", () => { S.showSettings = !S.showSettings; save(); syncInputs(); });
     num("o-low", "low"); num("o-pull", "pull"); num("o-pullmax", "pullMax"); num("o-r2", "r2"); num("o-cagr", "cagr");
-    $("o-trend").addEventListener("change", e => { S.trendOn = e.target.checked; save(); renderAll(); });
+    $("o-trend").addEventListener("change", e => { S.trendOn = e.target.checked; save(); syncInputs(); renderAll(); });
     $("o-zmode").addEventListener("change", e => { S.zmode = e.target.value; save(); syncInputs(); renderAll(); });
     if (isStock()) {
       num("o-mcap", "mcap"); num("o-disc", "disc"); num("o-term", "term"); num("o-gcap", "gcap");
       if ($("o-sector")) $("o-sector").addEventListener("change", e => { S.sector = e.target.checked; save(); renderAll(); });
       $("o-fin").addEventListener("change", e => { S.fin = e.target.checked; save(); renderAll(); });
     }
-    $("reset").addEventListener("click", () => { S = { ...DEF }; save(); syncInputs(); renderAll(); });
+    $("reset").addEventListener("click", () => { S = { ...DEF, off: {} }; save(); syncInputs(); renderAll(); });
     $("run").addEventListener("click", () => load(true));
     ["q", "minp", "sec"].forEach(id => $(id).addEventListener("input", () => { shown = 60; renderTable(); }));
     $("more").addEventListener("click", () => { shown += 60; renderTable(); });
