@@ -242,3 +242,54 @@ button.stat.active { border-color: var(--accent); background: var(--accent-soft)
   .nspark, .nzone:empty { display: none; }
   .nmiss { grid-column: 1 / -1; }
 }
+
+/* ticker lookup */
+.lookup { margin-left: auto; display: flex; gap: 6px; }
+.lookup input { font: inherit; font-size: 14px; width: 170px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--ink); text-transform: uppercase; }
+.lookup input::placeholder { text-transform: none; color: var(--muted); }
+.lookup button { font: inherit; font-size: 14px; font-weight: 600; padding: 8px 14px; border-radius: 999px; border: 0; background: var(--accent); color: var(--panel); cursor: pointer; }
+@media (max-width: 640px) { .lookup { margin-left: 0; width: 100%; } .lookup input { flex: 1; width: auto; min-width: 0; } }
+
+/* analysis dialog */
+dialog#an { width: min(920px, calc(100% - 32px)); max-height: 90vh; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); }
+dialog#an::backdrop { background: rgba(10, 16, 24, .55); }
+.an-inner { padding: 22px 24px 26px; display: grid; gap: 16px; }
+.an-loading { color: var(--muted); }
+.an-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.an-head h2 { font-size: 26px; letter-spacing: -.01em; }
+.an-head h2 .muted, .muted { color: var(--muted); font-weight: 500; }
+.an-verdict { padding: 12px 14px; border-radius: 10px; font-weight: 600; background: var(--fail-soft); color: var(--fail); }
+.an-verdict.ok { background: var(--pass-soft); color: var(--pass); }
+.an-verdict.warn { background: var(--warn-soft); color: var(--warn); }
+.an-chart { display: grid; gap: 8px; }
+.an-chart .spark { width: 100%; height: 90px; }
+.an-chart-cap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; font-size: 12.5px; color: var(--muted); }
+.an-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.an-facts div { background: var(--bg); border-radius: 8px; padding: 9px 11px; display: grid; gap: 2px; }
+.an-facts span { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.an-facts b { font-family: var(--f-data); font-weight: 500; font-size: 14px; }
+.an-sw { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.an-col { border-radius: 10px; padding: 12px 14px; background: var(--bg); }
+.an-col h3 { font-size: 15px; margin-bottom: 6px; }
+.an-col.good h3 { color: var(--pass); }
+.an-col.weak h3 { color: var(--fail); }
+.an-col ul { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: 13.5px; }
+.an-sub { font-size: 17px; margin-top: 4px; }
+.an-note { font-size: 12.5px; margin: -8px 0 0; color: var(--muted); }
+.an-pages { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
+.an-page { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.an-page-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.an-page-top a { font-family: var(--f-display); font-weight: 700; color: var(--ink); text-decoration: none; }
+.an-page-top a:hover { color: var(--accent); }
+.an-score { font-family: var(--f-data); font-size: 14px; padding: 2px 8px; border-radius: 999px; background: var(--fail-soft); color: var(--fail); }
+.an-score.ok { background: var(--pass-soft); color: var(--pass); }
+.an-score.warn { background: var(--warn-soft); color: var(--warn); }
+.an-page ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 12.5px; }
+.an-page li { display: grid; gap: 1px; }
+.an-page li span { color: var(--muted); }
+.an-page li.ok b { color: var(--pass); }
+.an-page li.bad b { color: var(--fail); }
+.an-page li.na b { color: var(--muted); }
+.an-excl { font-size: 12px; color: var(--warn); margin: 8px 0 0; }
+.an-actions { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.an-actions a { color: var(--accent); }

@@ -115,7 +115,14 @@
       ? `${P.tests.some(t => t.k === "mos") ? "" : `<th data-k="mos" class="r">Safety</th>`}<th data-k="iv" class="r">DCF value</th><th data-k="mc" class="r">Mkt cap</th>`
       : `<th data-k="r3" class="r">3-yr</th><th data-k="beta" class="r">Beta</th>`;
     document.getElementById("app").innerHTML = `
-  <nav class="topnav" aria-label="Pages"><a class="brand" href="index.html">Stock Desk</a>${nav}</nav>
+  <nav class="topnav" aria-label="Pages"><a class="brand" href="index.html">Stock Desk</a>${nav}
+    <form class="lookup" id="lookup" role="search" autocomplete="off">
+      <input id="lk" list="lk-list" placeholder="Analyze a ticker" aria-label="Ticker to analyze" spellcheck="false" autocapitalize="characters">
+      <button type="submit">Analyze</button>
+      <datalist id="lk-list"></datalist>
+    </form>
+  </nav>
+  <dialog id="an" aria-labelledby="an-title"><div class="an-inner" id="an-body"></div></dialog>
   <header>
     <div>
       <div class="eyebrow">${esc(P.eyebrow)}</div>
@@ -569,6 +576,203 @@
     }));
   }
 
+
+  // ---------- single-ticker analysis ----------
+  const DATASETS = {};
+  let LIVE = null;
+  async function dataset(name) {
+    if (DATA && P.data === name) return DATA;
+    if (DATASETS[name]) return DATASETS[name];
+    const d = await getJSON(name);
+    try {
+      LIVE = LIVE || await getJSON("live.json");
+      for (const r of d.rows) { const q = LIVE.q[r.t]; if (q) { r.px = q[0]; r.lo52 = q[1]; r.hi52 = q[2]; } }
+    } catch (e) {}
+    return DATASETS[name] = d;
+  }
+
+  // Run fn as if we were on page `pid`: the current page keeps the viewer's live settings, others use defaults.
+  function withPage(pid, data, fn) {
+    const saved = [P, S, DATA, PID];
+    try {
+      if (pid !== saved[3]) { PID = pid; P = CFG.pages[pid]; S = { ...defaults(), off: {} }; }
+      DATA = data;
+      return fn();
+    } finally { [P, S, DATA, PID] = saved; }
+  }
+
+  function exclusion(r) {
+    const out = [];
+    if (P.universe === "bc" && !r.bc) out.push("not in the S&P 100 or Dow 30");
+    if (isStock() && S.fin && FIN.has(r.sec)) out.push("financials and real estate are excluded");
+    if (isStock() && (r.mc || 0) < S.mcap * 1e9) out.push(`below the $${S.mcap}B minimum size`);
+    if (S.trendOn && !steady(r)) out.push("not a steady 5-year uptrend");
+    return out;
+  }
+
+  function strengthsWeaknesses(e, kind) {
+    const S_ = [], W = [];
+    const add = (cond, list, txt) => { if (cond) list.push(txt); };
+    const r = e;
+    if (kind === "stock") {
+      const med = e._med;
+      const nF = r.h ? r.h.fcf.filter(v => v != null).length : 0;
+      add(r.roemin != null && r.roemin >= 0.15, S_, `ROE above 15% every year (lowest ${pct(r.roemin, 0)}, average ${pct(r.roeavg, 0)})`);
+      add(r.roemin != null && r.roemin < 0.10, W, r.roemin < 0 ? `Lost money in at least one year (ROE ${pct(r.roemin, 0)})` : `ROE dropped to ${pct(r.roemin, 0)} in at least one year`);
+      add(r.roic != null && r.roic >= 0.15, S_, `High return on invested capital: ${pct(r.roic, 0)}`);
+      add(r.roic != null && r.roic < 0.08, W, `Low return on invested capital: ${pct(r.roic, 0)}`);
+      add(r.de != null && r.de >= 0 && r.de < 0.5, S_, `Low leverage: debt-to-equity ${fx(r.de)}`);
+      add(r.de != null && r.de < 0, W, "Negative shareholders' equity");
+      add(r.de != null && r.de > 1, W, `High leverage: debt-to-equity ${fx(r.de)}`);
+      add(r.dny != null && r.dny < 2, S_, `Could repay all debt with ${fx(r.dny, 1)} years of profit`);
+      add(r.dny != null && r.dny > 4, W, `Debt equals ${fx(r.dny, 1)} years of profit`);
+      add(r.fcfc === 100, S_, `Positive free cash flow in every year on record (${nF})`);
+      add(r.fcfc != null && r.fcfc < 100, W, `Free cash flow was negative in ${Math.round((100 - r.fcfc) / 100 * nF)} of ${nF} years`);
+      add(r.fcfy != null && r.fcfy >= 0.05, S_, `Strong free-cash-flow yield: ${pct(r.fcfy)}`);
+      add(r.fcfy != null && r.fcfy < 0.02, W, `Thin free-cash-flow yield: ${pct(r.fcfy)}`);
+      add(r.mgr != null && r.mgr > 1, S_, `Net margin expanding: +${fx(r.mgr, 1)} pts vs earlier years`);
+      add(r.mgr != null && r.mgr < -1, W, `Net margin shrinking: ${fx(r.mgr, 1)} pts vs earlier years`);
+      add(r.peg != null && r.peg > 0 && r.peg < 1, S_, `PEG ${fx(r.peg)}: growth at a reasonable price`);
+      add(r.peg != null && r.peg > 2, W, `Expensive for its growth: PEG ${fx(r.peg)}`);
+      add(r.peg != null && r.peg <= 0, W, "Earnings expected to shrink (negative PEG)");
+      add(r.pe != null && r.pe > 0 && med && r.pe < med, S_, `P/E ${fx(r.pe, 1)} is below its sector median of ${fx(med, 1)}`);
+      add(r.pe != null && r.pe <= 0, W, "Losing money on a trailing basis (negative P/E)");
+      add(r.pe != null && med && r.pe > med * 1.25, W, `P/E ${fx(r.pe, 1)} is well above its sector median of ${fx(med, 1)}`);
+      add(r.mos != null && r.mos >= 0.25, S_, `Trades ${pct(r.mos, 0)} below its DCF value of $${fx(r.iv)}`);
+      add(r.mos != null && r.mos < 0, W, `Price is ${pct(-r.mos, 0)} above its DCF value of $${fx(r.iv)}`);
+      add(r.iv != null && r.iv <= 0, W, "DCF value is negative: debt outweighs projected cash flow");
+      add(r.eg != null && r.eg >= 0.15, S_, `Earnings growing ${pct(r.eg, 0)} year over year`);
+      add(r.rg != null && r.rg >= 0.10, S_, `Revenue growing ${pct(r.rg, 0)} year over year`);
+      add(r.rg != null && r.rg < 0, W, `Revenue shrinking: ${pct(r.rg, 0)} year over year`);
+      add(r.up != null && r.up >= 0.15, S_, `Analysts' average target is ${pct(r.up, 0)} above the price`);
+    } else {
+      add(r.er != null && r.er <= 0.10, S_, `Very low cost: ${r.er.toFixed(2)}% a year`);
+      add(r.er != null && r.er > 0.40, W, `Expensive to own: ${r.er.toFixed(2)}% a year`);
+      add(r.aum != null && r.aum >= 10e9, S_, `Large, liquid fund: ${money(r.aum)} in assets`);
+      add(r.aum != null && r.aum < 1e9, W, `Small fund: ${money(r.aum)} in assets`);
+      add(r.pe != null && r.pe > 0 && r.pe < 20, S_, `Holdings valued at ${fx(r.pe, 1)}× earnings`);
+      add(r.pe != null && r.pe > 28, W, `Holdings are pricey at ${fx(r.pe, 1)}× earnings`);
+      add(r.r5 != null && r.r5 >= 0.10, S_, `Returned ${pct(r.r5, 1)} a year over 5 years`);
+      add(r.r5 != null && r.r5 < 0.05, W, `Returned only ${pct(r.r5, 1)} a year over 5 years`);
+      add(r.yld != null && r.yld >= 0.02, S_, `Pays a ${pct(r.yld, 2)} yield`);
+      add(r.beta != null && r.beta < 0.9, S_, `Less volatile than the market (beta ${fx(r.beta)})`);
+      add(r.beta != null && r.beta > 1.2, W, `More volatile than the market (beta ${fx(r.beta)})`);
+    }
+    add(r.r2 != null && r.r2 >= 0.75 && r.cagr5 >= 0.10, S_, `Steady 5-year uptrend: ${trendTxt(r)}`);
+    add(r.r2 != null && r.r2 < 0.5, W, `Choppy 5-year chart: steadiness R² ${fx(r.r2)}`);
+    add(r.cagr5 != null && r.cagr5 < 0, W, `Price down ${pct(-r.cagr5, 0)} a year over 5 years`);
+    add(r.maxdd != null && r.maxdd < -0.5, W, `Fell ${pct(-r.maxdd, 0)} from peak to trough in the last 5 years`);
+    add(r.warn && r.warn.length, W, `Unusual values (${r.warn.join(", ")}): double-check the underlying data`);
+    return [S_, W];
+  }
+
+  async function analyze(raw) {
+    const t = raw.trim().toUpperCase().replace(/\./g, "-");
+    const dlg = $("an"), body = $("an-body");
+    if (!t) return;
+    body.innerHTML = `<p class="an-loading">Analyzing ${esc(t)}…</p>`;
+    if (!dlg.open) dlg.showModal();
+    let found = null;
+    for (const name of ["scan.json", "etfs.json"]) {
+      const d = await dataset(name);
+      const r = d.rows.find(x => x.t === t);
+      if (r) { found = { r, name, d }; break; }
+    }
+    if (!found) {
+      body.innerHTML = `<div class="an-head"><div><h2 id="an-title">${esc(t)}</h2><p class="muted">Not in the scan.</p></div><button type="button" class="ghost" data-close>Close</button></div>
+        <p>The scanner covers the 1,503 stocks in the S&amp;P 500, 400 and 600 plus 139 major ETFs, refreshed every weekday. ${esc(t)} isn't one of them, so there's no data to score it with.</p>
+        <p><a href="https://finance.yahoo.com/quote/${encodeURIComponent(t)}" target="_blank" rel="noopener">Look up ${esc(t)} on Yahoo Finance ↗</a></p>`;
+      return;
+    }
+    const { r, name, d } = found;
+    const kind = name === "scan.json" ? "stock" : "etf";
+    const pids = Object.keys(CFG.pages).filter(id => CFG.pages[id].data === name);
+    const homePid = pids.includes(PID) ? PID : pids[0];
+    const results = pids.map(pid => withPage(pid, d, () => {
+      const e = evaluate(r);
+      return { pid, nav: P.nav, file: P.file, N: NT(), passes: e.passes, excl: exclusion(r),
+        tests: AT().map(tt => ({ name: testName(tt), pass: e.ev[tt.k].pass, na: e.ev[tt.k].na, txt: testTxt(e, tt) })) };
+    }));
+    const e = withPage(homePid, d, () => ({ ...evaluate(r), _med: kind === "stock" ? (d.medians[r.sec] ?? d.medians._market) : null, _zmode: S.zmode, _pull: S.pull, _pullMax: S.pullMax, _low: S.low, _zoneOn: S.zoneOn }));
+    const [good, bad] = strengthsWeaknesses(e, kind);
+
+    const best = results.slice().sort((a, b) => b.passes / b.N - a.passes / a.N)[0];
+    const fit = results.filter(x => x.passes === x.N && !x.excl.length);
+    const near = results.filter(x => x.passes === x.N - 1);
+    let verdict, tone;
+    if (fit.length) { verdict = `Fits your ${fit.map(x => x.nav).join(" and ")} criteria`; tone = "ok"; }
+    else if (results.some(x => x.passes === x.N)) { verdict = `Passes every ${best.nav} test, but is filtered off that page (${best.excl.join("; ")})`; tone = "warn"; }
+    else if (near.length) { const x = near[0]; verdict = `Near miss on ${x.nav}: missed ${x.tests.find(q => !q.pass).name.toLowerCase()}`; tone = "warn"; }
+    else { verdict = `Doesn't fit your criteria. Best match: ${best.nav}, ${best.passes} of ${best.N} tests`; tone = "bad"; }
+
+    const zoneTxt = !e._zoneOn ? "Buy zone is switched off." : e.nearLow
+      ? (e._zmode === "low" ? `In the buy zone: ${pct(e.fromLow, 1)} above its 52-week low.` : `In the buy zone: ${pct(-e.fromHigh, 1)} below its 52-week high.`)
+      : (e._zmode === "low" ? `Not in the buy zone: ${pct(e.fromLow, 1)} above its 52-week low (zone is within ${e._low}%).` : `Not in the buy zone: ${pct(-e.fromHigh, 1)} below its 52-week high (zone is ${e._pull}–${e._pullMax}%).`);
+
+    const pageCards = results.map(x => `
+      <div class="an-page">
+        <div class="an-page-top"><a href="${x.file}">${esc(x.nav)}</a><span class="an-score ${x.passes === x.N ? "ok" : x.passes === x.N - 1 ? "warn" : ""}">${x.passes}/${x.N}</span></div>
+        <ul>${x.tests.map(q => `<li class="${q.na ? "na" : q.pass ? "ok" : "bad"}"><b>${q.na ? "–" : q.pass ? "✓" : "✕"} ${esc(q.name)}</b><span>${esc(q.txt)}</span></li>`).join("")}</ul>
+        ${x.excl.length ? `<p class="an-excl">Not shown on this page: ${esc(x.excl.join("; "))}.</p>` : ""}
+      </div>`).join("");
+
+    const facts = kind === "stock" ? [
+      ["Price", `$${fx(r.px)}`], ["DCF value", e.iv == null ? "—" : `$${fx(e.iv)}`],
+      ["Margin of safety", e.mos == null ? "—" : pct(e.mos, 0)], ["Market cap", money(r.mc)],
+      ["P/E · forward", `${fx(r.pe, 1)} · ${fx(r.fpe, 1)}`], ["Dividend yield", r.dy == null ? "—" : r.dy.toFixed(2) + "%"],
+    ] : [
+      ["Price", `$${fx(r.px)}`], ["Expense ratio", r.er == null ? "—" : r.er.toFixed(2) + "%"], ["Assets", money(r.aum)],
+      ["P/E of holdings", fx(r.pe, 1)], ["3-yr · 5-yr return", `${pct(r.r3, 1)} · ${pct(r.r5, 1)}`], ["Yield", pct(r.yld, 2)],
+    ];
+
+    body.innerHTML = `
+      <div class="an-head">
+        <div><div class="eyebrow">${esc(kind === "stock" ? `${r.sec} · ${r.ind || ""}` : r.cat || r.grp)}</div>
+          <h2 id="an-title">${esc(r.t)} <span class="muted">${esc(r.n)}</span></h2></div>
+        <button type="button" class="ghost" data-close>Close</button>
+      </div>
+      <div class="an-verdict ${tone}">${esc(verdict)}</div>
+      <div class="an-chart">${spark(e, 640, 90)}<div class="an-chart-cap"><span>5-year price · ${esc(trendTxt(e))}</span><span>${esc(zoneTxt)}</span></div>
+        <div class="range"><span class="mono">$${fx(r.lo52)}</span><div class="rtrack"><i style="left:${(e.rangePos ?? 0) * 100}%"></i></div><span class="mono">$${fx(r.hi52)}</span></div></div>
+      <div class="an-facts">${facts.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div>
+      <div class="an-sw">
+        <div class="an-col good"><h3>Strengths</h3>${good.length ? `<ul>${good.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p class="muted">None stand out.</p>`}</div>
+        <div class="an-col weak"><h3>Weaknesses</h3>${bad.length ? `<ul>${bad.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p class="muted">None stand out.</p>`}</div>
+      </div>
+      <h3 class="an-sub">How it scores on your screens</h3>
+      <p class="muted an-note">${pids.includes(PID) ? `${esc(CFG.pages[PID].nav)} uses your current settings on this page; the others use their default settings.` : "Scored with each screen's default settings."}</p>
+      <div class="an-pages">${pageCards}</div>
+      ${kind === "stock" && e.iv != null && e.iv > 0 ? `<p class="an-note">DCF: ${money(r.fcf0)} average free cash flow growing ${pct(e.dcfg, 1)} a year for 5 years, fading to ${CFG.dcf.term}%, discounted at ${CFG.dcf.disc}%, plus ${r.netcash >= 0 ? "net cash" : "net debt of"} ${money(Math.abs(r.netcash))}.</p>` : ""}
+      <div class="an-actions">
+        ${P.data === name ? `<button type="button" class="reset" data-show="${esc(r.t)}">Show in this page's ranking</button>` : ""}
+        <a href="https://finance.yahoo.com/quote/${encodeURIComponent(r.t)}" target="_blank" rel="noopener">Open on Yahoo Finance ↗</a>
+      </div>`;
+  }
+
+  async function fillLookupList() {
+    try {
+      const opts = [];
+      for (const name of ["scan.json", "etfs.json"]) {
+        const d = await dataset(name);
+        for (const r of d.rows) opts.push(`<option value="${esc(r.t)}">${esc(r.n)}</option>`);
+      }
+      $("lk-list").innerHTML = opts.join("");
+    } catch (e) {}
+  }
+
+  function wireLookup() {
+    $("lookup").addEventListener("submit", e => { e.preventDefault(); analyze($("lk").value); });
+    $("an").addEventListener("click", e => {
+      if (e.target === $("an") || e.target.closest("[data-close]")) { $("an").close(); return; }
+      const b = e.target.closest("[data-show]");
+      if (b) {
+        $("an").close();
+        const t = b.dataset.show; open.add(t); $("q").value = t; $("minp").value = "0"; $("sec").value = ""; renderTable();
+        $("table-block").scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  }
+
   async function boot() {
     try { CFG = await getJSON("config.json", true); }
     catch (e) { document.getElementById("app").innerHTML = `<div class="err">Could not load the site configuration (${esc(e.message)}).</div>`; return; }
@@ -580,7 +784,9 @@
       if (typeof saved.showSettings === "boolean") S.showSettings = saved.showSettings;
       save();  // drops any screening settings stored by older versions
     } catch (e) {}
-    shell(); syncInputs(); wire(); load(false);
+    shell(); syncInputs(); wire(); wireLookup();
+    await load(false);
+    fillLookupList();
   }
   boot();
 })();
