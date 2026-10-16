@@ -215,3 +215,30 @@ td.trendcell small { display: block; font-family: var(--f-data); font-size: 10.5
 .desk.nosettings { grid-template-columns: minmax(0, 1fr); }
 .desk.nosettings .rail { display: none; }
 @media (prefers-reduced-motion: reduce) { .sw i, .sw i::after { transition: none; } }
+
+/* clickable summary + near-miss panel */
+button.stat { font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.stat:hover { border-color: var(--accent); }
+button.stat.active { border-color: var(--accent); background: var(--accent-soft); }
+.stat .s { text-wrap: balance; }
+.near { margin-top: 18px; background: var(--panel); border: 1px solid var(--accent); border-radius: 12px; padding: 16px 18px; }
+.near .bhead { margin-bottom: 10px; }
+.fchips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.fchip { font: inherit; font-size: 12.5px; font-weight: 600; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); cursor: pointer; }
+.fchip:hover { color: var(--ink); }
+.fchip.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.nlist { display: grid; gap: 0; }
+.nrow { font: inherit; color: inherit; text-align: left; cursor: pointer; background: none; border: 0; border-top: 1px solid var(--line);
+  display: grid; grid-template-columns: minmax(150px, 1.1fr) 90px minmax(0, 2fr) 54px 96px; gap: 12px; align-items: center; padding: 10px 4px; }
+.nrow:hover { background: var(--accent-soft); }
+.nname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nmiss { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; min-width: 0; font-size: 13px; }
+.ntxt { color: var(--muted); font-family: var(--f-data); font-size: 12px; }
+.chip.miss { background: var(--fail-soft); color: var(--fail); }
+.nscore { font-family: var(--f-data); text-align: right; line-height: 1; }
+.nscore small { display: block; font-size: 10px; color: var(--muted); font-family: var(--f-body); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
+@media (max-width: 720px) {
+  .nrow { grid-template-columns: minmax(0, 1fr) auto; }
+  .nspark, .nzone:empty { display: none; }
+  .nmiss { grid-column: 1 / -1; }
+}

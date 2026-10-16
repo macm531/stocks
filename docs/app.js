@@ -76,7 +76,7 @@
   }
 
   let CFG, P, PID = window.PAGE_ID, DATA = null, ranked = [], S = {}, DEF = {};
-  let sortK = null, sortDir = -1, shown = 60, open = new Set(), baseCount = 0;
+  let sortK = null, sortDir = -1, shown = 60, open = new Set(), baseCount = 0, nearOpen = false, nearFilter = null;
   const KEY = () => "vqs-settings-" + PID;
   // Tests the viewer has switched on; everything that counts passes uses these.
   const on = t => !(S.off && S.off[t.k]);
@@ -160,16 +160,22 @@
     </aside>
     <main style="min-width:0">
       <div class="summary" id="summary"></div>
+      <section class="near" id="near-block" hidden>
+        <div class="bhead"><div><h2 id="near-title">Near misses</h2><p>Each stock passes every test you have on except one. The red tag shows which one, and by how much. Click a stock for its full breakdown.</p></div>
+          <button type="button" class="reset" id="near-close">Close</button></div>
+        <div class="fchips" id="near-filters"></div>
+        <div class="nlist" id="near-list"></div>
+      </section>
       <div class="funnel"><h2>Screening funnel</h2><div id="funnel"></div></div>
-      <section class="block">
+      <section class="block" id="zone-block">
         <div class="bhead"><div><h2>Buy zone</h2><p id="zone-desc">Passing ${CFG.minPasses}+ tests and in the buy zone you set on the left. These trigger email alerts.</p></div></div>
         <div class="picks" id="zone"></div>
       </section>
-      <section class="block">
+      <section class="block" id="picks-block">
         <div class="bhead"><div><h2>Top picks</h2><p id="picks-desc"></p></div></div>
         <div class="picks" id="picks"></div>
       </section>
-      <section class="block">
+      <section class="block" id="table-block">
         <div class="bhead">
           <div><h2>Full ranking</h2><p>Sorted by tests passed, then composite score. Click a row for the breakdown.</p></div>
           <div class="tools">
@@ -303,10 +309,41 @@
     const N = NT(), all5 = ranked.filter(r => r.passes === N).length, four = ranked.filter(r => r.passes === N - 1).length;
     const zone = ranked.filter(r => r.passes >= zmin() && r.nearLow).length;
     $("summary").innerHTML = `
-      <div class="stat${all5 ? " hot" : ""}"><div class="eyebrow">Pass all ${N}</div><div class="v">${all5}</div><div class="s">full matches</div></div>
-      <div class="stat"><div class="eyebrow">Pass ${N - 1} of ${N}</div><div class="v">${four}</div><div class="s">near misses</div></div>
-      <div class="stat${zone ? " hot" : ""}"><div class="eyebrow">In buy zone</div><div class="v">${zone}</div><div class="s">${S.zmode === "low" ? "near 52-week low" : "pulled back from high"}</div></div>
-      <div class="stat"><div class="eyebrow">Screened</div><div class="v">${ranked.length.toLocaleString()}</div><div class="s">${isStock() ? (P.universe === "bc" ? "S&amp;P 100 + Dow 30" : "of " + DATA.universe.toLocaleString() + " in the S&amp;P 1500") : "equity ETFs"}</div></div>`;
+      <button type="button" class="stat${all5 ? " hot" : ""}" data-go="picks-block"><div class="eyebrow">Pass all ${N}</div><div class="v">${all5}</div><div class="s">full matches · view</div></button>
+      <button type="button" class="stat${nearOpen ? " active" : ""}" data-go="near" aria-expanded="${nearOpen}" aria-controls="near-block"><div class="eyebrow">Pass ${N - 1} of ${N}</div><div class="v">${four}</div><div class="s">near misses · ${nearOpen ? "hide" : "see what each missed"}</div></button>
+      <button type="button" class="stat${zone ? " hot" : ""}" data-go="zone-block"><div class="eyebrow">In buy zone</div><div class="v">${zone}</div><div class="s">${S.zmode === "low" ? "near 52-week low" : "pulled back from high"} · view</div></button>
+      <button type="button" class="stat" data-go="table-block"><div class="eyebrow">Screened</div><div class="v">${ranked.length.toLocaleString()}</div><div class="s">${isStock() ? (P.universe === "bc" ? "S&amp;P 100 + Dow 30" : "of " + DATA.universe.toLocaleString() + " in the S&amp;P 1500") : "equity ETFs"}</div></button>`;
+  }
+
+  const missDetail = (r, t) => t.k === "mos" && r.mos != null && r.mos < 0
+    ? `price is ${pct(-r.mos, 0)} above DCF value $${fx(r.iv)}, ${needTxt(t).replace("over", "at least")} below`
+    : t.k === "mos" && r.mos != null ? `price is ${pct(r.mos, 0)} below DCF value $${fx(r.iv)}, ${needTxt(t)}`
+    : `${META[t.k].show(r)}, ${needTxt(t)}`;
+
+  // Stocks one test short of a full match, with the test they missed.
+  function renderNear() {
+    const blk = $("near-block");
+    blk.hidden = !nearOpen;
+    if (!nearOpen) return;
+    const N = NT();
+    const rows = ranked.filter(r => N > 1 && r.passes === N - 1).map(r => ({ r, miss: AT().find(t => !r.ev[t.k].pass) }));
+    const counts = {};
+    rows.forEach(x => counts[x.miss.k] = (counts[x.miss.k] || 0) + 1);
+    if (nearFilter && !counts[nearFilter]) nearFilter = null;
+    $("near-title").textContent = `Near misses: passing ${N - 1} of ${N}`;
+    $("near-filters").innerHTML = `<button type="button" class="fchip${nearFilter ? "" : " on"}" data-miss="">All ${rows.length}</button>` +
+      AT().filter(t => counts[t.k]).sort((a, b) => counts[b.k] - counts[a.k]).map(t =>
+        `<button type="button" class="fchip${nearFilter === t.k ? " on" : ""}" data-miss="${t.k}">Missed ${esc(testName(t))} · ${counts[t.k]}</button>`).join("");
+    const list = rows.filter(x => !nearFilter || x.miss.k === nearFilter);
+    $("near-list").innerHTML = !list.length ? `<div class="empty">No near misses with these settings.</div>` : list.map(({ r, miss }) => `
+      <button type="button" class="nrow" data-t="${esc(r.t)}">
+        <span class="nname"><span class="tk">${esc(r.t)}</span> <span class="nm">${esc(r.n)}</span></span>
+        <span class="nspark">${spark(r, 84, 24)}</span>
+        <span class="nmiss"><span class="chip miss">Missed: ${esc(testName(miss))}</span>
+          <span class="ntxt">${esc(META[miss.k].bad && META[miss.k].bad(r) ? META[miss.k].bad(r) : r.ev[miss.k].na ? "No data for this test" : missDetail(r, miss))}</span></span>
+        <span class="nscore">${r.score}<small>score</small></span>
+        <span class="nzone">${r.nearLow ? `<span class="chip new">In buy zone</span>` : ""}</span>
+      </button>`).join("");
   }
 
   function renderFunnel() {
@@ -371,17 +408,22 @@
       </button>`).join("");
   }
 
+  const unitTxt = (t, v) => `${v}${["×", "%"].includes(META[t.k].sfx) ? META[t.k].sfx : " " + META[t.k].sfx}`;
+  const testName = t => META[t.k].title.replace(/ (below|above|at least|within)$/, "");
+  function testTxt(r, t) {
+    const m = META[t.k], e = r.ev[t.k];
+    if (e.na) return "No data.";
+    if (m.bad && m.bad(r)) return m.bad(r);
+    let txt = `${m.show(r)} vs ${t.dir === "lt" ? "limit" : "bar"} ${unitTxt(t, S[t.k])}.`;
+    if (t.k === "pe" && isStock()) txt += ` Sector median ${fx(e.secMed, 1)}×${S.sector && !e.underSec ? " (above it)" : ""}.`;
+    if (t.k === "peg" && r.pegs === "calc") txt += " Calculated from trailing growth.";
+    return txt;
+  }
+  const needTxt = t => `needs ${t.dir === "lt" ? "under" : t.dir === "ge" ? "at least" : "over"} ${unitTxt(t, S[t.k])}`;
+
   function why(r) {
     const lines = P.tests.map(t => {
-      const m = META[t.k], e = r.ev[t.k];
-      let txt;
-      if (e.na) txt = "No data.";
-      else if (m.bad && m.bad(r)) txt = m.bad(r);
-      else {
-        txt = `${m.show(r)} vs ${t.dir === "lt" ? "limit" : "bar"} ${S[t.k]}${["×", "%"].includes(m.sfx) ? m.sfx : " " + m.sfx}.`;
-        if (t.k === "pe" && isStock()) txt += ` Sector median ${fx(e.secMed, 1)}×${S.sector && !e.underSec ? " (above it)" : ""}.`;
-        if (t.k === "peg" && r.pegs === "calc") txt += " Calculated from trailing growth.";
-      }
+      const m = META[t.k], e = r.ev[t.k], txt = testTxt(r, t);
       if (!on(t)) return `<div class="na off"><b>Off · ${m.title.replace(/ (below|above)$/, "")}</b>${m.show(r)} (not counted)</div>`;
       return `<div class="${cls(e)}"><b>${e.na ? "No data" : e.pass ? "Pass" : "Fail"} · ${m.title.replace(/ (below|above)$/, "")}</b>${txt}</div>`;
     }).join("");
@@ -442,7 +484,7 @@
     if (N) opts.push([String(N), `All ${N} passed`]);
     $("minp").innerHTML = opts.map(([v, l]) => `<option value="${v}"${v === cur ? " selected" : ""}>${l}</option>`).join("");
   }
-  function renderAll() { minpOptions(); rankAll(); renderSummary(); renderFunnel(); renderZone(); renderPicks(); renderTable(); }
+  function renderAll() { minpOptions(); rankAll(); renderSummary(); renderNear(); renderFunnel(); renderZone(); renderPicks(); renderTable(); }
 
   function stamp() {
     const fmt = x => new Date(x).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
@@ -505,6 +547,18 @@
       else { sortK = k; sortDir = (["t", "grp", "fromLow"].includes(k) || lt) ? 1 : -1; }
       renderTable();
     }));
+    $("summary").addEventListener("click", e => {
+      const b = e.target.closest(".stat"); if (!b) return;
+      if (b.dataset.go === "near") { nearOpen = !nearOpen; renderSummary(); renderNear(); if (nearOpen) $("near-block").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+      $(b.dataset.go).scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    $("near-close").addEventListener("click", () => { nearOpen = false; renderSummary(); renderNear(); });
+    $("near-filters").addEventListener("click", e => { const c = e.target.closest(".fchip"); if (!c) return; nearFilter = c.dataset.miss || null; renderNear(); });
+    $("near-list").addEventListener("click", e => {
+      const p = e.target.closest(".nrow"); if (!p) return;
+      const t = p.dataset.t; open.add(t); $("q").value = t; $("minp").value = "0"; $("sec").value = ""; renderTable();
+      $("table-block").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
     const toggle = t => { open.has(t) ? open.delete(t) : open.add(t); renderTable(); };
     $("tb").addEventListener("click", e => { const tr = e.target.closest("tr.main"); if (tr && !e.target.closest("a")) toggle(tr.dataset.t); });
     $("tb").addEventListener("keydown", e => { const tr = e.target.closest("tr.main"); if (tr && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggle(tr.dataset.t); } });
