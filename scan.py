@@ -1,7 +1,8 @@
-"""Value + quality stock scan.
+"""Stock scan: every NYSE and Nasdaq common stock (see universe.py).
 
-Pulls the S&P 1500 (large, mid, small cap) from Wikipedia, fetches fundamentals
-from Yahoo Finance, and writes docs/scan.json for the scanner page to score.
+Incremental: each run refreshes fundamentals for the stalest tickers within a time
+budget (S&P 1500 first, so they refresh daily), merges them into docs/scan.json, then
+refreshes 52-week ranges and 5-year trends for everything in one batched pass.
 
 Metrics (raw values only; the page applies thresholds so they stay adjustable):
   pe       trailing P/E
@@ -10,7 +11,7 @@ Metrics (raw values only; the page applies thresholds so they stay adjustable):
   roic     EBIT * (1 - tax rate) / (Total Debt + Equity - Cash)   (latest annual)
   fcfy     trailing free cash flow / market cap
 
-Usage:  .venv/bin/python scan.py [--limit N]
+Usage:  .venv/bin/python scan.py [--budget MINUTES] [--limit N]
 """
 import argparse
 import io
@@ -31,27 +32,9 @@ from ranges import price_ranges, trend_stats
 ROOT = Path(__file__).parent
 OUT = ROOT / "docs" / "scan.json"
 HISTORY = ROOT / "history"
+CKPT = ROOT / "scan_partial.json"  # progress saved during a run, so a crash never loses fetched data
 
-INDEXES = {
-    "S&P 500": ("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", "Symbol"),
-    "S&P 400": ("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", "Symbol"),
-    "S&P 600": ("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", "Symbol"),
-}
 UA = {"User-Agent": "Mozilla/5.0 (stock-scanner personal use)"}
-
-
-def universe():
-    tickers = {}
-    for name, (url, col) in INDEXES.items():
-        html = requests.get(url, headers=UA, timeout=30).text
-        for table in pd.read_html(io.StringIO(html)):
-            cols = [str(c) for c in table.columns]
-            match = next((c for c in cols if c.lower() in (col.lower(), "ticker symbol", "ticker")), None)
-            if match:
-                for sym in table[match].astype(str):
-                    tickers.setdefault(sym.strip().replace(".", "-"), name)
-                break
-    return tickers
 
 
 BLUECHIP_LISTS = [
@@ -211,6 +194,7 @@ def _fetch(sym, index):
         "n": i.get("shortName") or i.get("longName") or sym,
         "idx": index,
         "sec": i.get("sector") or "Unknown",
+        "ctry": i.get("country") or "",
         "ind": i.get("industry") or "",
         "px": price,
         "mc": mcap,
@@ -263,66 +247,124 @@ def sector_medians(rows):
     return out
 
 
+def approx_russell2000(rows):
+    """Russell 2000 approximation: US companies ranked 1,001-3,000 by market cap (FTSE Russell's rule)."""
+    us = sorted((r for r in rows if r.get("ctry") == "United States" and r.get("mc")), key=lambda r: -r["mc"])
+    members = {r["t"] for r in us[1000:3000]}
+    for r in rows:
+        r["r2k"] = r["t"] in members
+    print(f"Russell 2000 (approx.) tagged: {len(members)}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--budget", type=float, default=70, help="minutes to spend fetching fundamentals")
+    ap.add_argument("--stale-hours", type=float, default=20, help="refresh anything older than this")
+    ap.add_argument("--limit", type=int, default=0, help="cap tickers fetched this run (testing)")
     args = ap.parse_args()
 
-    uni = universe()
-    syms = list(uni.items())[: args.limit or None]
-    print(f"universe: {len(uni)} tickers, scanning {len(syms)}", flush=True)
+    from universe import build
+    uni = build()
+    old = {}
+    if OUT.exists():
+        try:
+            old_data = json.loads(OUT.read_text())
+            old = {r["t"]: r for r in old_data["rows"]}
+        except Exception:
+            old_data = None
+    else:
+        old_data = None
 
-    t0, rows, failed = time.time(), [], []
-    with ThreadPoolExecutor(args.workers) as ex:
-        futs = [ex.submit(fetch, s, idx) for s, idx in syms]
-        for k, f in enumerate(as_completed(futs), 1):
-            r = f.result()
-            (failed if "err" in r else rows).append(r)
-            if k % 100 == 0:
-                print(f"  {k}/{len(syms)}  {time.time() - t0:.0f}s", flush=True)
+    # Resume: rows fetched by an interrupted run count as fresh cache.
+    if CKPT.exists():
+        try:
+            part = json.loads(CKPT.read_text())
+            old.update(part)
+            print(f"resuming: {len(part)} rows from an interrupted run", flush=True)
+        except Exception:
+            pass
 
-    # Yahoo rate-limits bursts ("Invalid Crumb" / 429). Retry stragglers slowly.
+    # Oldest data first; S&P 1500 members jump the queue so they refresh every day.
+    now = datetime.now(timezone.utc)
+    def age_h(t):
+        ts = old.get(t, {}).get("ts")
+        return 1e9 if not ts else (now - datetime.fromisoformat(ts)).total_seconds() / 3600
+    stale = [t for t in uni if age_h(t) >= args.stale_hours]
+    stale.sort(key=lambda t: (uni[t]["idx"] == "", -age_h(t)))
+    if args.limit:
+        stale = stale[:args.limit]
+    print(f"universe: {len(uni)} tickers, {len(old)} cached, {len(stale)} due for refresh", flush=True)
+
+    t0, fresh, failed = time.time(), {}, []
+    deadline = t0 + args.budget * 60
+    def run(batch, workers):
+        with ThreadPoolExecutor(workers) as ex:
+            for r in ex.map(lambda t: fetch(t, uni[t]["idx"]), batch):
+                if "err" in r:
+                    failed.append(r["t"])
+                else:
+                    r["ts"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                    fresh[r["t"]] = r
+    for k in range(0, len(stale), 100):
+        if time.time() > deadline:
+            print(f"time budget reached after {k} tickers; the rest wait for the next run", flush=True)
+            break
+        run(stale[k:k + 100], args.workers)
+        if (k // 100) % 5 == 4:
+            CKPT.write_text(json.dumps(fresh, separators=(",", ":")))
+        print(f"  {min(k + 100, len(stale))}/{len(stale)}  {time.time() - t0:.0f}s  ({len(failed)} failed)", flush=True)
+
+    # Yahoo rate-limits bursts ("Invalid Crumb" / 429). Retry stragglers slowly while time allows.
     for rnd in range(1, 4):
-        if not failed:
+        if not failed or time.time() > deadline + 600:
             break
         time.sleep(30 * rnd)
-        print(f"retry round {rnd}: {len(failed)} tickers", flush=True)
-        retry, failed = failed, []
-        with ThreadPoolExecutor(2) as ex:
-            for r in ex.map(lambda f: fetch(f["t"], uni[f["t"]]), retry):
-                (failed if "err" in r else rows).append(r)
-                time.sleep(0.3)
+        retry, failed[:] = list(failed), []
+        print(f"retry round {rnd}: {len(retry)} tickers", flush=True)
+        run(retry, 2)
 
+    # Merge: fresh rows win, cached rows fill in, delisted tickers drop out.
+    rows = []
+    for t, info in uni.items():
+        r = fresh.get(t) or old.get(t)
+        if not r:
+            continue
+        r["idx"], r["exch"] = info["idx"], info["exch"]
+        rows.append(r)
     rows.sort(key=lambda r: r["t"])
-    add_ranges(rows)
+    CKPT.write_text(json.dumps(fresh, separators=(",", ":")))
+    try:
+        add_ranges(rows)
+    except Exception as e:  # never lose fundamentals over a price-history hiccup
+        print(f"price/trend refresh failed: {e}", flush=True)
+    # drop shells: no price, or under $50M (micro-caps too thin to score)
+    rows = [r for r in rows if r.get("px") and (r.get("mc") or 0) >= 50e6]
     tag_bluechips(rows)
+    approx_russell2000(rows)
     meds = sector_medians(rows)
 
     # Previous scan, so the page can flag stocks that are new to the shortlist.
     prev = None
-    if OUT.exists():
-        try:
-            old = json.loads(OUT.read_text())
-            keep = ("pe", "peg", "de", "roic", "fcfy", "roemin", "dny", "mgr", "fcfc", "fcf0", "fcfg", "netcash", "sh")
-            prev = {"at": old["at"], "rows": {r["t"]: {k: r.get(k) for k in keep} for r in old["rows"]}}
-        except Exception:
-            prev = None
+    if old_data:
+        keep = ("pe", "peg", "de", "roic", "fcfy", "roemin", "dny", "mgr", "fcfc", "fcf0", "fcfg", "netcash", "sh")
+        prev = {"at": old_data["at"], "rows": {r["t"]: {k: r.get(k) for k in keep} for r in old_data["rows"]}}
 
     data = {
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "universe": len(uni),
         "scanned": len(rows),
-        "failed": [f["t"] for f in failed],
+        "refreshed": len(fresh),
+        "failed": failed,
         "medians": meds,
         "rows": rows,
         "prev": prev,
     }
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(data, separators=(",", ":")))
-    HISTORY.mkdir(exist_ok=True)
-    (HISTORY / f"scan-{data['at'][:10]}.json").write_text(json.dumps(data, separators=(",", ":")))
-    print(f"done: {len(rows)} ok, {len(failed)} failed, {time.time() - t0:.0f}s -> {OUT}")
+    CKPT.unlink(missing_ok=True)
+    print(f"done: {len(fresh)} refreshed, {len(failed)} failed, {len(rows)} in file, "
+          f"{time.time() - t0:.0f}s -> {OUT} ({OUT.stat().st_size / 1e6:.1f} MB)")
 
 
 if __name__ == "__main__":

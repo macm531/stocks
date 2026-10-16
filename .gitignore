@@ -2,6 +2,13 @@
 __pycache__/
 history/
 *.log
-!alerts.log
 launchd.log
 scan.log
+
+# data lives on the `data` branch (see .github/workflows/update.yml)
+docs/scan.json
+docs/etfs.json
+docs/live.json
+universe.json
+alerts_state.json
+scan_partial.json

@@ -1,12 +1,14 @@
 # Value Quality Scanner
 
-Personal stock screener: ranks the S&P 1500 on PEG, debt-to-equity, ROIC, free-cash-flow yield and P/E, and emails when a shortlisted stock nears its 52-week low.
+Personal stock screener: ranks every NYSE and Nasdaq stock (5,000+) on PEG, debt-to-equity, ROIC, free-cash-flow yield and P/E, and emails when a shortlisted stock nears its 52-week low.
 
 ## How it runs
 - **Site**: `docs/` is published with GitHub Pages. `docs/index.html` scores and ranks in the browser; thresholds are editable on the page.
 - **Pages**: Value screen (`index.html`), Buffett (`buffett.html`: ROE every year, debt-years, margin trend, FCF consistency, DCF margin of safety), Blue chips (`bluechips.html`, S&P 100 + Dow 30), ETFs (`etfs.html`). All share `app.js`/`app.css`; thresholds live in `docs/config.json`, which the alert job reads too.
-- **Fundamentals**: `scan.py` → `docs/scan.json`, `etf.py` → `docs/etfs.json`. GitHub Actions runs them weekdays ~7am ET.
-- **Prices + alerts**: `alert.py` → `docs/live.json`, every 30 min in market hours. Stocks passing 4+ tests and within 5% of their 52-week low get emailed to macm53@gmail.com, once per stock per day.
+- **Universe**: `universe.py` builds the list from the nasdaqtrader.com symbol directory (Nasdaq + NYSE common stocks) with S&P 500/400/600 tags from Wikipedia; cached in `universe.json`. Russell 2000 is approximated in `scan.py` as US companies ranked 1,001-3,000 by market cap.
+- **Fundamentals**: `scan.py` is incremental: each run refreshes the stalest tickers within `--budget` minutes (S&P 1500 first, daily), merges into `docs/scan.json`, then batch-refreshes 52-week ranges and 5-year trends for all. `etf.py` → `docs/etfs.json`. GitHub Actions runs two passes a day.
+- **Data branch**: data files are not on `main`; the workflow loads them from the `data` branch and force-pushes a single fresh commit there each run, so history doesn't grow.
+- **Prices + alerts**: `alert.py` → `docs/live.json`, every 15 min in market hours. Stocks passing 4+ tests and within 5% of their 52-week low get emailed to macm53@gmail.com, once per stock per day.
 - Workflow: `.github/workflows/update.yml`. Run it by hand from the repo's Actions tab ("Update site" → Run workflow).
 
 ## Email

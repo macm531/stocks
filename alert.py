@@ -43,10 +43,18 @@ PAGE_URL = os.environ.get("SITE_URL", "https://macm531.github.io/stocks/")
 CONFIG = json.loads((ROOT / "docs" / "config.json").read_text())  # same thresholds as the site
 LOW_PCT = CONFIG["lowPct"] / 100
 TREND = CONFIG["trend"]          # only steady 5-year uptrends, when on
+RETURNS = CONFIG["returns"]      # beats-the-market filter: average yearly gain over the period
 ZONE = CONFIG["zone"]            # "pullback" from 52-week high, or "low" near 52-week low
 MIN_PASSES = CONFIG["minPasses"]
 EXCLUDE_SECTORS = {"Financial Services", "Real Estate"}
 ET = ZoneInfo("America/New_York")
+
+# Same membership rules as UNI_TEST in docs/app.js ("bc" = S&P 100 + Dow 30).
+UNIVERSE = {
+    "all": lambda r: True, "bc": lambda r: bool(r.get("bc")), "sp1500": lambda r: bool(r.get("idx")),
+    "sp500": lambda r: r.get("idx") == "S&P 500", "r2k": lambda r: bool(r.get("r2k")),
+    "nyse": lambda r: r.get("exch") == "NYSE", "nasdaq": lambda r: r.get("exch") == "Nasdaq",
+}
 
 # Raw value -> threshold units, and which values count as invalid (always fail). Mirrors META in docs/app.js.
 UNIT = {"roic": 100, "fcfy": 100, "r5": 100, "yld": 100, "aum": 1e-9, "roemin": 100, "mos": 100}
@@ -58,6 +66,19 @@ def log(msg):
     print(line)
     with LOG.open("a") as f:
         f.write(line + "\n")
+
+
+def ret_for(r):
+    """Average yearly gain for the configured period; mirrors retFor() in docs/app.js."""
+    p = RETURNS["period"]
+    if p == "5":
+        return r.get("cagr5")
+    if p == "10":
+        return r.get("cagr10")
+    if p == "both":
+        long_ = r.get("cagr10") if r.get("cagr10") is not None else r.get("cagrL")
+        return None if r.get("cagr5") is None or long_ is None else min(r["cagr5"], long_)
+    return r.get("cagrL") if r.get("cagrL") is not None else r.get("cagr5")
 
 
 def dcf(r):
@@ -99,13 +120,15 @@ def watchlist():
     for pid, page in CONFIG["pages"].items():
         d = data.setdefault(page["data"], json.loads((ROOT / "docs" / page["data"]).read_text()))
         for r in d["rows"]:
-            if page["universe"] == "bc" and not r.get("bc"):
+            if not UNIVERSE[page["universe"]](r):
                 continue
             if page["kind"] == "stock" and (
                     (page.get("excludeFin") and r["sec"] in EXCLUDE_SECTORS)
                     or (r.get("mc") or 0) < page.get("minCapB", 0) * 1e9):
                 continue
-            if TREND["on"] and not ((r.get("r2") or -1) >= TREND["r2"] and (r.get("cagr5") or -1) * 100 >= TREND["cagr"]):
+            if TREND["on"] and not (r.get("r2") or -1) >= TREND["r2"]:
+                continue
+            if RETURNS["on"] and not (ret_for(r) is not None and ret_for(r) * 100 >= RETURNS["min"]):
                 continue
             n = passes(r, page, d.get("medians", {}))
             if n >= MIN_PASSES and r["t"] not in out:
@@ -180,7 +203,7 @@ def build_email(hits):
     td = "<td style='padding:6px 10px;border-bottom:1px solid #eef1f4'>"
     lines, rows = [], []
     for h in hits:
-        trend = f"R² {h.get('r2') or 0:.2f}, {(h.get('cagr5') or 0) * 100:+.0f}%/yr"
+        trend = f"R² {h.get('r2') or 0:.2f}, {(ret_for(h) or 0) * 100:+.0f}%/yr avg"
         lines.append(f"[{h['page']}] {h['t']} {h['n']}: ${h['px']:.2f}, {zone_txt(h)} | 5-yr trend {trend} "
                      f"| {h['passes']}/5 tests | {metrics_line(h)}")
         ref = h["hi52"] if pb else h["lo52"]

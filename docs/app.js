@@ -47,16 +47,31 @@
       bad: r => r.iv != null && r.iv <= 0 ? "DCF value is negative (debt exceeds cash-flow value)." : r.fcf0 != null && r.fcf0 <= 0 ? "Negative average free cash flow; DCF not meaningful." : null },
   };
 
+  // Average yearly gain (dividends included) for the chosen period.
+  const RET_PERIODS = { long: "last 10 years (5 if newer)", "10": "last 10 years only", "5": "last 5 years", both: "both 5 and 10 years" };
+  function retFor(r, period = S.period) {
+    if (period === "5") return r.cagr5;
+    if (period === "10") return r.cagr10;
+    if (period === "both") return r.cagr5 == null || r.cagrL == null ? null : Math.min(r.cagr5, r.cagr10 ?? r.cagrL);
+    return r.cagrL ?? r.cagr5;
+  }
+  const retYears = r => S.period === "5" ? 5 : S.period === "10" ? 10 : S.period === "both" ? "5 & 10" : (r.cagr10 != null ? 10 : r.yrsL ? Math.floor(r.yrsL) : 5);
+  const beats = r => { const v = retFor(r); return v != null && v * 100 >= S.retMin; };
+
   // 5-year mini chart (weekly closes, every 4th week). Green when the trend is steady and rising.
   function spark(r, w = 96, h = 26) {
     const p = r.spark;
     if (!p || p.length < 2) return `<span class="spark-na">—</span>`;
     const lo = Math.min(...p), hi = Math.max(...p), span = hi - lo || 1;
     const pts = p.map((v, i) => `${(i / (p.length - 1) * (w - 2) + 1).toFixed(1)},${(h - 2 - (v - lo) / span * (h - 4)).toFixed(1)}`).join(" ");
-    const good = r.r2 != null && r.r2 >= S.r2 && r.cagr5 != null && r.cagr5 * 100 >= S.cagr;
+    const good = steady(r) && beats(r);
     return `<svg class="spark ${good ? "up" : "flat"}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="5-year price chart"><polyline points="${pts}" fill="none" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
   }
-  const trendTxt = r => r.r2 == null ? "No 5-year history" : `R² ${r.r2.toFixed(2)} · ${r.cagr5 >= 0 ? "+" : ""}${(r.cagr5 * 100).toFixed(0)}%/yr`;
+  const trendTxt = r => {
+    if (r.r2 == null) return "No 5-year history";
+    const v = retFor(r);
+    return `R² ${r.r2.toFixed(2)} · ${v == null ? "—" : (v >= 0 ? "+" : "") + (v * 100).toFixed(0) + "%/yr"} (${retYears(r)}y)`;
+  };
 
   // Two-stage DCF on average free cash flow. Growth = historical FCF growth, capped; fades to terminal over years 6–10.
   function dcf(r) {
@@ -76,7 +91,7 @@
   }
 
   let CFG, P, PID = window.PAGE_ID, DATA = null, ranked = [], S = {}, DEF = {};
-  let sortK = null, sortDir = -1, shown = 60, open = new Set(), baseCount = 0, nearOpen = false, nearFilter = null;
+  let sortK = null, sortDir = -1, shown = 60, open = new Set(), baseCount = 0, steadyCount = 0, beatsCount = 0, nearOpen = false, nearFilter = null;
   const KEY = () => "vqs-settings-" + PID;
   // Tests the viewer has switched on; everything that counts passes uses these.
   const on = t => !(S.off && S.off[t.k]);
@@ -140,6 +155,8 @@
   </header>
   <div class="desk" id="desk">
     <aside class="rail" id="rail" aria-label="Screening settings">
+      ${isStock() && P.universe !== "bc" ? `<div class="crit"><label for="o-uni" class="eyebrow">Stocks to include</label>
+        <select id="o-uni" class="zsel">${Object.entries(CFG.universes).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select></div><hr>` : ""}
       <div class="eyebrow">Chart shape</div>
       <label class="sw"><input id="o-trend" type="checkbox"><i></i><span><b>Only steady uptrends</b><br><span style="color:var(--muted);font-weight:400">5-year charts that climb up and to the right</span></span></label>
       <div class="crit" id="crit-trend">
@@ -147,9 +164,11 @@
         <div class="field"><input id="o-r2" type="number" step="0.05" min="0" max="1"><span>R² (0–1)</span></div>
         <small>How closely the 5-year price follows a straight rising line on a log scale. NVDA and CAT score about 0.88; a choppy sideways chart scores under 0.5.</small>
       </div>
-      <div class="crit" id="crit-trend2">
-        <label for="o-cagr">5-year price growth at least</label>
-        <div class="field"><input id="o-cagr" type="number" step="1"><span>% a year</span></div>
+      <div class="crit" id="crit-ret">
+        <div class="crit-top"><label class="sw"><input type="checkbox" id="o-ret"><i></i><span>Beats the market</span></label><span class="cnt" id="c-ret"></span></div>
+        <div class="field"><span>Average gain of at least</span><input id="o-retmin" type="number" step="1"><span>% a year</span></div>
+        <select id="o-period" class="zsel" aria-label="Period for average yearly gain">${Object.entries(RET_PERIODS).map(([k, v]) => `<option value="${k}">over the ${v}</option>`).join("")}</select>
+        <small>Average yearly total return, dividends included. The stock market has averaged about 10% a year, so 10% means keeping pace with it or better.</small>
       </div>
       <hr>
       <div class="eyebrow">Criteria</div>
@@ -213,9 +232,9 @@
 
   // ---------- settings ----------
   function defaults() {
-    const d = { off: {}, zoneOn: true, showSettings: true, low: CFG.lowPct, trendOn: CFG.trend.on, r2: CFG.trend.r2, cagr: CFG.trend.cagr, zmode: CFG.zone.mode, pull: CFG.zone.pullback, pullMax: CFG.zone.pullbackMax };
+    const d = { off: {}, zoneOn: true, showSettings: true, low: CFG.lowPct, trendOn: CFG.trend.on, r2: CFG.trend.r2, retOn: CFG.returns.on, retMin: CFG.returns.min, period: CFG.returns.period, zmode: CFG.zone.mode, pull: CFG.zone.pullback, pullMax: CFG.zone.pullbackMax };
     for (const t of P.tests) d[t.k] = t.t;
-    if (isStock()) Object.assign(d, { sector: !!P.sectorPE, fin: !!P.excludeFin, mcap: P.minCapB || 0, ...CFG.dcf });
+    if (isStock()) Object.assign(d, { uni: P.universe === "bc" ? "all" : P.universe, sector: !!P.sectorPE, fin: !!P.excludeFin, mcap: P.minCapB || 0, ...CFG.dcf });
     return d;
   }
   function syncInputs() {
@@ -227,17 +246,21 @@
     }
     $("o-zone").checked = S.zoneOn;
     $("crit-zone").classList.toggle("off", !S.zoneOn);
-    ["crit-trend", "crit-trend2"].forEach(id => $(id).classList.toggle("off", !S.trendOn));
-    $("o-r2").disabled = $("o-cagr").disabled = !S.trendOn;
+    $("crit-trend").classList.toggle("off", !S.trendOn);
+    $("o-r2").disabled = !S.trendOn;
+    $("crit-ret").classList.toggle("off", !S.retOn);
+    $("o-retmin").disabled = $("o-period").disabled = !S.retOn;
+    $("o-ret").checked = S.retOn; $("o-retmin").value = S.retMin; $("o-period").value = S.period;
     $("desk").classList.toggle("nosettings", !S.showSettings);
     $("toggle-settings").textContent = S.showSettings ? "Hide settings" : "Show settings";
     $("toggle-settings").setAttribute("aria-expanded", S.showSettings);
     $("o-low").value = S.low; $("o-pull").value = S.pull; $("o-pullmax").value = S.pullMax; $("o-zmode").value = S.zmode;
-    $("o-trend").checked = S.trendOn; $("o-r2").value = S.r2; $("o-cagr").value = S.cagr;
+    $("o-trend").checked = S.trendOn; $("o-r2").value = S.r2;
     $("zone-low").hidden = S.zmode !== "low"; $("zone-pull").hidden = S.zmode !== "pullback";
     if (isStock()) {
       if ($("o-sector")) $("o-sector").checked = S.sector;
       $("o-fin").checked = S.fin; $("o-mcap").value = S.mcap;
+      if ($("o-uni")) $("o-uni").value = S.uni;
       $("o-disc").value = S.disc; $("o-term").value = S.term; $("o-gcap").value = S.gcap;
     }
   }
@@ -282,17 +305,27 @@
       nearLow: !S.zoneOn ? false : S.zmode === "low" ? fromLow != null && fromLow <= S.low / 100 : fromHigh != null && fromHigh <= -S.pull / 100 && fromHigh >= -S.pullMax / 100 };
   }
 
-  const steady = r => r.r2 != null && r.r2 >= S.r2 && r.cagr5 != null && r.cagr5 * 100 >= S.cagr;
+  const steady = r => r.r2 != null && r.r2 >= S.r2;
+  const UNI_TEST = {
+    all: () => true, sp1500: r => !!r.idx, sp500: r => r.idx === "S&P 500", r2k: r => !!r.r2k,
+    nyse: r => r.exch === "NYSE", nasdaq: r => r.exch === "Nasdaq",
+  };
+  const uniLabel = () => P.universe === "bc" ? "S&P 100 + Dow 30" : CFG.universes[S.uni] || "All";
   function inUniverse(r, ignoreTrend) {
     if (S.trendOn && !ignoreTrend && !steady(r)) return false;
+    if (S.retOn && !ignoreTrend && !beats(r)) return false;
     if (P.universe === "bc" && !r.bc) return false;
+    if (isStock() && P.universe !== "bc" && !(UNI_TEST[S.uni] || UNI_TEST.all)(r)) return false;
     if (isStock() && S.fin && FIN.has(r.sec)) return false;
     if (isStock() && (r.mc || 0) < S.mcap * 1e9) return false;
     return true;
   }
 
   function rankAll() {
-    baseCount = DATA.rows.filter(r => inUniverse(r, true)).length;
+    const base = DATA.rows.filter(r => inUniverse(r, true));
+    baseCount = base.length;
+    steadyCount = base.filter(steady).length;
+    beatsCount = base.filter(r => (!S.trendOn || steady(r)) && beats(r)).length;
     ranked = DATA.rows.filter(r => inUniverse(r)).map(evaluate).sort((a, b) => b.passes - a.passes || b.score - a.score);
     ranked.forEach((r, i) => r.rank = i + 1);
     const prevPass = new Set();
@@ -319,7 +352,7 @@
       <button type="button" class="stat${all5 ? " hot" : ""}" data-go="picks-block"><div class="eyebrow">Pass all ${N}</div><div class="v">${all5}</div><div class="s">full matches · view</div></button>
       <button type="button" class="stat${nearOpen ? " active" : ""}" data-go="near" aria-expanded="${nearOpen}" aria-controls="near-block"><div class="eyebrow">Pass ${N - 1} of ${N}</div><div class="v">${four}</div><div class="s">near misses · ${nearOpen ? "hide" : "see what each missed"}</div></button>
       <button type="button" class="stat${zone ? " hot" : ""}" data-go="zone-block"><div class="eyebrow">In buy zone</div><div class="v">${zone}</div><div class="s">${S.zmode === "low" ? "near 52-week low" : "pulled back from high"} · view</div></button>
-      <button type="button" class="stat" data-go="table-block"><div class="eyebrow">Screened</div><div class="v">${ranked.length.toLocaleString()}</div><div class="s">${isStock() ? (P.universe === "bc" ? "S&amp;P 100 + Dow 30" : "of " + DATA.universe.toLocaleString() + " in the S&amp;P 1500") : "equity ETFs"}</div></button>`;
+      <button type="button" class="stat" data-go="table-block"><div class="eyebrow">Screened</div><div class="v">${ranked.length.toLocaleString()}</div><div class="s">${isStock() ? esc(uniLabel()) + (P.universe === "bc" ? "" : ` · ${DATA.scanned.toLocaleString()} stocks over $50M`) : "equity ETFs"}</div></button>`;
   }
 
   const missDetail = (r, t) => t.k === "mos" && r.mos != null && r.mos < 0
@@ -356,9 +389,13 @@
   function renderFunnel() {
     let set = ranked, max = baseCount || 1, html = "";
     const row = (name, n) => `<div class="frow"><span>${name}</span><div class="ftrack"><div class="fbar" style="width:${Math.max(n ? 0.6 : 0, n / max * 100)}%"></div></div><span class="num">${n}</span></div>`;
-    if (S.trendOn) html += row(isStock() ? "Universe" : "All funds", baseCount);
-    $("c-trend").textContent = S.trendOn ? ranked.length + " steady" : "off";
-    const steps = [[S.trendOn ? "Steady uptrend" : (isStock() ? "Universe" : "All funds"), () => true], ...AT().map((t, i) => [(i ? "+ " : "") + META[t.k].title.replace(/ (below|above)$/, ""), r => r.ev[t.k].pass])];
+    const uniName = isStock() ? "Universe" : "All funds";
+    if (S.trendOn || S.retOn) html += row(uniName, baseCount);
+    if (S.trendOn && S.retOn) html += row("Steady uptrend", steadyCount);
+    $("c-trend").textContent = S.trendOn ? steadyCount + " steady" : "off";
+    $("c-ret").textContent = S.retOn ? beatsCount + " beat it" : "off";
+    const first = S.retOn ? `${S.trendOn ? "+ " : ""}Beats ${S.retMin}%/yr` : S.trendOn ? "Steady uptrend" : uniName;
+    const steps = [[first, () => true], ...AT().map((t, i) => [(i ? "+ " : "") + META[t.k].title.replace(/ (below|above)$/, ""), r => r.ev[t.k].pass])];
     for (const [name, f] of steps) {
       set = set.filter(f);
       html += row(name, set.length);
@@ -437,7 +474,7 @@
     const extra = isStock()
       ? `<span>${esc(r.ind)}</span><span>Price $${fx(r.px)}</span><span>Fwd P/E ${fx(r.fpe, 1)}</span>
          <span>Earnings growth ${pct(r.eg, 0)}</span><span>Revenue growth ${pct(r.rg, 0)}</span><span>ROE ${pct(r.roe, 0)}</span>
-         <span>Div. yield ${r.dy == null ? "—" : r.dy.toFixed(2) + "%"}</span><span>${esc(r.idx)}</span>`
+         <span>Div. yield ${r.dy == null ? "—" : r.dy.toFixed(2) + "%"}</span><span>${esc([r.exch, r.idx, r.r2k ? "Russell 2000 (approx.)" : ""].filter(Boolean).join(" · "))}</span>`
       + `<span>Analyst target ${r.up == null ? "—" : (r.up >= 0 ? "+" : "") + (r.up * 100).toFixed(0) + "%"}</span>`
       : `<span>${esc(r.fam)}</span><span>${esc(r.grp)}</span><span>Price $${fx(r.px)}</span><span>3-yr ${pct(r.r3, 1)}/yr</span>
          <span>YTD ${r.ytd == null ? "—" : r.ytd.toFixed(1) + "%"}</span><span>Beta ${fx(r.beta)}</span>`;
@@ -450,7 +487,7 @@
       <tr><td>Net margin</td>${r.h.nm.map(v => `<td class="n">${pct(v, 1)}</td>`).join("")}</tr>
       <tr><td>Free cash flow</td>${r.h.fcf.map(v => `<td class="n${v != null && v < 0 ? " bad" : ""}">${money(v)}</td>`).join("")}</tr>
       </tbody></table></div>`;
-    const trendLine = `<p class="dcf"><b>5-year chart:</b> ${r.r2 == null ? "not enough price history." : `steadiness R² ${r.r2.toFixed(2)} (${steady(r) ? "passes" : "below"} your ${S.r2} bar), ${(r.cagr5 * 100).toFixed(1)}% a year, worst drop along the way ${(r.maxdd * 100).toFixed(0)}%. Now ${(r.fromHigh * 100).toFixed(1)}% from its 52-week high.`}</p>`;
+    const trendLine = `<p class="dcf"><b>5-year chart:</b> ${r.r2 == null ? "not enough price history." : `steadiness R² ${r.r2.toFixed(2)} (${steady(r) ? "passes" : "below"} your ${S.r2} bar), ${(r.cagr5 * 100).toFixed(1)}% a year over 5 years${r.cagr10 != null ? `, ${(r.cagr10 * 100).toFixed(1)}% over 10` : ""} (${beats(r) ? "beats" : "below"} your ${S.retMin}% bar), worst drop along the way ${(r.maxdd * 100).toFixed(0)}%. Now ${(r.fromHigh * 100).toFixed(1)}% from its 52-week high.`}</p>`;
     return `<div class="why">${lines}</div>${trendLine}${dcfTxt}${hist}
       <div class="extra">${extra}<span>52-wk range $${fx(r.lo52)}–$${fx(r.hi52)}</span>
         <a href="https://finance.yahoo.com/quote/${encodeURIComponent(r.t)}" target="_blank" rel="noopener">Yahoo Finance ↗</a></div>`;
@@ -536,11 +573,14 @@
     }
     $("o-zone").addEventListener("change", e => { S.zoneOn = e.target.checked; save(); syncInputs(); renderAll(); });
     $("toggle-settings").addEventListener("click", () => { S.showSettings = !S.showSettings; save(); syncInputs(); });
-    num("o-low", "low"); num("o-pull", "pull"); num("o-pullmax", "pullMax"); num("o-r2", "r2"); num("o-cagr", "cagr");
+    num("o-low", "low"); num("o-pull", "pull"); num("o-pullmax", "pullMax"); num("o-r2", "r2"); num("o-retmin", "retMin");
+    $("o-ret").addEventListener("change", e => { S.retOn = e.target.checked; syncInputs(); renderAll(); });
+    $("o-period").addEventListener("change", e => { S.period = e.target.value; renderAll(); });
     $("o-trend").addEventListener("change", e => { S.trendOn = e.target.checked; save(); syncInputs(); renderAll(); });
     $("o-zmode").addEventListener("change", e => { S.zmode = e.target.value; save(); syncInputs(); renderAll(); });
     if (isStock()) {
-      num("o-mcap", "mcap"); num("o-disc", "disc"); num("o-term", "term"); num("o-gcap", "gcap");
+      num("o-mcap", "mcap");
+      if ($("o-uni")) $("o-uni").addEventListener("change", e => { S.uni = e.target.value; shown = 60; renderAll(); }); num("o-disc", "disc"); num("o-term", "term"); num("o-gcap", "gcap");
       if ($("o-sector")) $("o-sector").addEventListener("change", e => { S.sector = e.target.checked; save(); renderAll(); });
       $("o-fin").addEventListener("change", e => { S.fin = e.target.checked; save(); renderAll(); });
     }
@@ -604,6 +644,7 @@
   function exclusion(r) {
     const out = [];
     if (P.universe === "bc" && !r.bc) out.push("not in the S&P 100 or Dow 30");
+    if (isStock() && P.universe !== "bc" && !(UNI_TEST[S.uni] || UNI_TEST.all)(r)) out.push(`outside "${uniLabel()}"`);
     if (isStock() && S.fin && FIN.has(r.sec)) out.push("financials and real estate are excluded");
     if (isStock() && (r.mc || 0) < S.mcap * 1e9) out.push(`below the $${S.mcap}B minimum size`);
     if (S.trendOn && !steady(r)) out.push("not a steady 5-year uptrend");
@@ -658,7 +699,10 @@
       add(r.beta != null && r.beta < 0.9, S_, `Less volatile than the market (beta ${fx(r.beta)})`);
       add(r.beta != null && r.beta > 1.2, W, `More volatile than the market (beta ${fx(r.beta)})`);
     }
-    add(r.r2 != null && r.r2 >= 0.75 && r.cagr5 >= 0.10, S_, `Steady 5-year uptrend: ${trendTxt(r)}`);
+    add(r.r2 != null && r.r2 >= 0.75, S_, `Steady 5-year uptrend (steadiness R² ${fx(r.r2)})`);
+    const lr = r.cagrL ?? r.cagr5, ly = r.cagr10 != null ? 10 : Math.floor(r.yrsL || 5);
+    add(lr != null && lr >= 0.10, S_, `Beat the market: ${pct(lr, 1)} a year over ${ly} years, dividends included`);
+    add(lr != null && lr >= 0 && lr < 0.07, W, `Lagged the market: only ${pct(lr, 1)} a year over ${ly} years`);
     add(r.r2 != null && r.r2 < 0.5, W, `Choppy 5-year chart: steadiness R² ${fx(r.r2)}`);
     add(r.cagr5 != null && r.cagr5 < 0, W, `Price down ${pct(-r.cagr5, 0)} a year over 5 years`);
     add(r.maxdd != null && r.maxdd < -0.5, W, `Fell ${pct(-r.maxdd, 0)} from peak to trough in the last 5 years`);
@@ -680,7 +724,7 @@
     }
     if (!found) {
       body.innerHTML = `<div class="an-head"><div><h2 id="an-title">${esc(t)}</h2><p class="muted">Not in the scan.</p></div><button type="button" class="ghost" data-close>Close</button></div>
-        <p>The scanner covers the 1,503 stocks in the S&amp;P 500, 400 and 600 plus 139 major ETFs, refreshed every weekday. ${esc(t)} isn't one of them, so there's no data to score it with.</p>
+        <p>The scanner covers every NYSE and Nasdaq common stock worth over $50 million, plus 139 major ETFs. ${esc(t)} isn't one of them (it may be an OTC stock, a fund, a preferred share, or too small), so there's no data to score it with.</p>
         <p><a href="https://finance.yahoo.com/quote/${encodeURIComponent(t)}" target="_blank" rel="noopener">Look up ${esc(t)} on Yahoo Finance ↗</a></p>`;
       return;
     }
@@ -727,7 +771,7 @@
 
     body.innerHTML = `
       <div class="an-head">
-        <div><div class="eyebrow">${esc(kind === "stock" ? `${r.sec} · ${r.ind || ""}` : r.cat || r.grp)}</div>
+        <div><div class="eyebrow">${esc(kind === "stock" ? [r.sec, r.ind, r.exch, r.idx, r.r2k ? "Russell 2000 (approx.)" : ""].filter(Boolean).join(" · ") : r.cat || r.grp)}</div>
           <h2 id="an-title">${esc(r.t)} <span class="muted">${esc(r.n)}</span></h2></div>
         <button type="button" class="ghost" data-close>Close</button>
       </div>

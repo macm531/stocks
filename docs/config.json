@@ -6,8 +6,8 @@
       "file": "index.html",
       "nav": "Value screen",
       "title": "Value Quality Scanner",
-      "eyebrow": "S&P 1500 \u00b7 value + quality screen",
-      "intro": "Ranks the S&P 500, 400 and 600 on five tests: PEG, debt-to-equity, ROIC, free-cash-flow yield and P/E. Valuation bars are set for steady compounders, which rarely trade at deep-value multiples; debt and ROIC stay strict. Change any threshold and the board re-scores instantly.",
+      "eyebrow": "NYSE + Nasdaq \u00b7 value + quality screen",
+      "intro": "Ranks every NYSE and Nasdaq stock on five tests: PEG, debt-to-equity, ROIC, free-cash-flow yield and P/E. Valuation bars are set for steady compounders, which rarely trade at deep-value multiples; debt and ROIC stay strict. Change any threshold and the board re-scores instantly.",
       "kind": "stock",
       "data": "scan.json",
       "universe": "all",
@@ -46,7 +46,7 @@
       "file": "buffett.html",
       "nav": "Buffett",
       "title": "Buffett Moat Screen",
-      "eyebrow": "S&P 1500 \u00b7 consistent returns, low debt, margin of safety",
+      "eyebrow": "NYSE + Nasdaq \u00b7 consistent returns, low debt, margin of safety",
       "intro": "Warren Buffett's checklist: ROE of 15%+ every year, debt the business could repay from a few years of profit, widening margins, cash flow every year, and a price well below a discounted-cash-flow estimate of intrinsic value.",
       "kind": "stock",
       "data": "scan.json",
@@ -167,12 +167,24 @@
   },
   "trend": {
     "on": true,
-    "r2": 0.75,
-    "cagr": 10
+    "r2": 0.75
   },
   "zone": {
     "mode": "pullback",
     "pullback": 10,
     "pullbackMax": 30
+  },
+  "universes": {
+    "all": "All NYSE + Nasdaq",
+    "sp1500": "S&P 1500",
+    "sp500": "S&P 500",
+    "r2k": "Russell 2000 (approx.)",
+    "nyse": "NYSE only",
+    "nasdaq": "Nasdaq only"
+  },
+  "returns": {
+    "on": true,
+    "min": 10,
+    "period": "long"
   }
 }
