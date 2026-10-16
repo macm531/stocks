@@ -71,9 +71,9 @@ def log(msg):
 def ret_for(r):
     """Average yearly gain for the configured period; mirrors retFor() in docs/app.js."""
     p = RETURNS["period"]
-    if p == "5":
+    if p == "y5":
         return r.get("cagr5")
-    if p == "10":
+    if p == "y10":
         return r.get("cagr10")
     if p == "both":
         long_ = r.get("cagr10") if r.get("cagr10") is not None else r.get("cagrL")

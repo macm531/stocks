@@ -48,14 +48,14 @@
   };
 
   // Average yearly gain (dividends included) for the chosen period.
-  const RET_PERIODS = { long: "last 10 years (5 if newer)", "10": "last 10 years only", "5": "last 5 years", both: "both 5 and 10 years" };
+  const RET_PERIODS = { long: "over 10 years (5 if newer)", y10: "over 10 years only", y5: "over 5 years", both: "over both 5 and 10 years" };
   function retFor(r, period = S.period) {
-    if (period === "5") return r.cagr5;
-    if (period === "10") return r.cagr10;
+    if (period === "y5") return r.cagr5;
+    if (period === "y10") return r.cagr10;
     if (period === "both") return r.cagr5 == null || r.cagrL == null ? null : Math.min(r.cagr5, r.cagr10 ?? r.cagrL);
     return r.cagrL ?? r.cagr5;
   }
-  const retYears = r => S.period === "5" ? 5 : S.period === "10" ? 10 : S.period === "both" ? "5 & 10" : (r.cagr10 != null ? 10 : r.yrsL ? Math.floor(r.yrsL) : 5);
+  const retYears = r => S.period === "y5" ? 5 : S.period === "y10" ? 10 : S.period === "both" ? "5 & 10" : (r.cagr10 != null ? 10 : r.yrsL ? Math.floor(r.yrsL) : 5);
   const beats = r => { const v = retFor(r); return v != null && v * 100 >= S.retMin; };
 
   // 5-year mini chart (weekly closes, every 4th week). Green when the trend is steady and rising.
@@ -167,7 +167,7 @@
       <div class="crit" id="crit-ret">
         <div class="crit-top"><label class="sw"><input type="checkbox" id="o-ret"><i></i><span>Beats the market</span></label><span class="cnt" id="c-ret"></span></div>
         <div class="field"><span>Average gain of at least</span><input id="o-retmin" type="number" step="1"><span>% a year</span></div>
-        <select id="o-period" class="zsel" aria-label="Period for average yearly gain">${Object.entries(RET_PERIODS).map(([k, v]) => `<option value="${k}">over the ${v}</option>`).join("")}</select>
+        <select id="o-period" class="zsel" aria-label="Period for average yearly gain">${Object.entries(RET_PERIODS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
         <small>Average yearly total return, dividends included. The stock market has averaged about 10% a year, so 10% means keeping pace with it or better.</small>
       </div>
       <hr>
