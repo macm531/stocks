@@ -59,8 +59,29 @@ def fetch(sym, group, tries=3):
 
 def main():
     pairs = [(s, g) for g, syms in ETFS.items() for s in syms.split()]
-    with ThreadPoolExecutor(4) as ex:
-        rows = [r for r in ex.map(lambda p: fetch(*p), pairs) if r]
+    with ThreadPoolExecutor(3) as ex:
+        got = {p[0]: r for p, r in zip(pairs, ex.map(lambda p: fetch(*p), pairs)) if r}
+    # Yahoo throttles bursts; retry the misses slowly, then fall back to the last saved data.
+    for rnd in range(1, 3):
+        miss = [p for p in pairs if p[0] not in got]
+        if not miss:
+            break
+        time.sleep(20 * rnd)
+        for p in miss:
+            r = fetch(*p)
+            if r:
+                got[p[0]] = r
+            time.sleep(0.5)
+    old = {}
+    if OUT.exists():
+        try:
+            old = {r["t"]: r for r in json.loads(OUT.read_text())["rows"]}
+        except Exception:
+            pass
+    kept = [t for t, _ in pairs if t not in got and t in old]
+    rows = list(got.values()) + [old[t] for t in kept]
+    if kept:
+        print(f"kept last saved data for {len(kept)} ETFs Yahoo didn't return", flush=True)
     rng = price_ranges([r["t"] for r in rows])
     tr = trend_stats([r["t"] for r in rows])
     for r in rows:
