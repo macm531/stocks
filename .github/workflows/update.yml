@@ -70,7 +70,7 @@ jobs:
 
       - name: Rescan fundamentals (stalest first, within budget)
         if: steps.mode.outputs.mode == 'scan'
-        run: python scan.py --budget 75 && python etf.py && python alert.py --force --prices-only
+        run: python etf.py && python scan.py --budget 75 && python alert.py --force --prices-only  # ETFs first, before Yahoo throttles
 
       - name: Refresh prices and send alerts
         if: steps.mode.outputs.mode == 'prices'
