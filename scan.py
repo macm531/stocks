@@ -271,6 +271,9 @@ def main():
         try:
             old_data = json.loads(OUT.read_text())
             old = {r["t"]: r for r in old_data["rows"]}
+            # tickers dropped for being too small still count as checked, so they aren't refetched every run
+            for t, ts in old_data.get("skipped", {}).items():
+                old.setdefault(t, {"t": t, "ts": ts, "_skip": True})
         except Exception:
             old_data = None
     else:
@@ -328,7 +331,7 @@ def main():
     rows = []
     for t, info in uni.items():
         r = fresh.get(t) or old.get(t)
-        if not r:
+        if not r or r.get("_skip"):
             continue
         r["idx"], r["exch"] = info["idx"], info["exch"]
         rows.append(r)
@@ -338,8 +341,12 @@ def main():
         add_ranges(rows)
     except Exception as e:  # never lose fundamentals over a price-history hiccup
         print(f"price/trend refresh failed: {e}", flush=True)
-    # drop shells: no price, or under $50M (micro-caps too thin to score)
-    rows = [r for r in rows if r.get("px") and (r.get("mc") or 0) >= 50e6]
+    # drop shells: no price, or under $50M (micro-caps too thin to score); remember when they were checked
+    keep = [r for r in rows if r.get("px") and (r.get("mc") or 0) >= 50e6]
+    kept = {r["t"] for r in keep}
+    skipped = {t: r["ts"] for t, r in old.items() if r.get("_skip") and t in uni and t not in fresh}
+    skipped.update({r["t"]: r.get("ts") for r in rows if r["t"] not in kept and r.get("ts")})
+    rows = keep
     tag_bluechips(rows)
     approx_russell2000(rows)
     meds = sector_medians(rows)
@@ -356,6 +363,7 @@ def main():
         "scanned": len(rows),
         "refreshed": len(fresh),
         "failed": failed,
+        "skipped": skipped,
         "medians": meds,
         "rows": rows,
         "prev": prev,
