@@ -343,6 +343,7 @@
 
   // ---------- render ----------
   const cls = e => e.na ? "na" : e.pass ? "ok" : "bad";
+  const priceTag = r => r.px == null ? "" : `<span class="px">$${r.px >= 1000 ? r.px.toFixed(0) : r.px.toFixed(2)}</span>`;
   const chipMuted = txt => `<span class="chip" style="background:var(--track);color:var(--muted)">${txt}</span>`;
 
   function renderSummary() {
@@ -377,7 +378,7 @@
     const list = rows.filter(x => !nearFilter || x.miss.k === nearFilter);
     $("near-list").innerHTML = !list.length ? `<div class="empty">No near misses with these settings.</div>` : list.map(({ r, miss }) => `
       <button type="button" class="nrow" data-t="${esc(r.t)}">
-        <span class="nname"><span class="tk">${esc(r.t)}</span> <span class="nm">${esc(r.n)}</span></span>
+        <span class="nname"><span class="tk">${esc(r.t)}</span> ${priceTag(r)} <span class="nm">${esc(r.n)}</span></span>
         <span class="nspark">${spark(r, 84, 24)}</span>
         <span class="nmiss"><span class="chip miss">Missed: ${esc(testName(miss))}</span>
           <span class="ntxt">${esc(META[miss.k].bad && META[miss.k].bad(r) ? META[miss.k].bad(r) : r.ev[miss.k].na ? "No data for this test" : missDetail(r, miss))}</span></span>
@@ -429,7 +430,7 @@
     const note = top.length ? "" : `<div class="empty" style="grid-column:1/-1">Nothing passes all ${N} tests right now. Showing the best near misses (${N - 1} of ${N}).</div>`;
     $("picks").innerHTML = note + pool.map(r => `
       <button class="pick" type="button" data-t="${esc(r.t)}">
-        <div class="pick-top"><div><div class="tick">${esc(r.t)}</div><div class="pname">${sub(r)}</div></div>
+        <div class="pick-top"><div><div class="tick">${esc(r.t)} ${priceTag(r)}</div><div class="pname">${sub(r)}</div></div>
           <div class="score">${r.score}<small>score</small></div></div>
         ${mgrid(r)}
         <div class="sparkrow">${spark(r, 220, 40)}<span>${trendTxt(r)}</span></div>
@@ -444,7 +445,7 @@
     if (!z.length) { $("zone").innerHTML = `<div class="empty">Nothing passing ${zmin()}+ tests is ${pb ? `${S.pull}–${S.pullMax}% below its 52-week high` : `within ${S.low}% of its 52-week low`} right now.</div>`; return; }
     $("zone").innerHTML = z.map(r => `
       <button class="pick" type="button" data-t="${esc(r.t)}">
-        <div class="pick-top"><div><div class="tick">${esc(r.t)}</div><div class="pname">${sub(r)} · ${r.passes}/${NT()} tests</div></div>
+        <div class="pick-top"><div><div class="tick">${esc(r.t)} ${priceTag(r)}</div><div class="pname">${sub(r)} · ${r.passes}/${NT()} tests</div></div>
           <div class="score">${pb ? (r.fromHigh * 100).toFixed(1) + "%<small>from high</small>" : "+" + (r.fromLow * 100).toFixed(1) + "%<small>above low</small>"}</div></div>
         <div class="sparkrow">${spark(r, 220, 40)}<span>${trendTxt(r)}</span></div>
         <div class="range"><span class="mono">$${fx(r.lo52)}</span><div class="rtrack"><i style="left:${(r.rangePos ?? 0) * 100}%"></i></div><span class="mono">$${fx(r.hi52)}</span></div>
@@ -508,7 +509,7 @@
       : `<td class="n">${pct(r.r3, 1)}</td><td class="n">${fx(r.beta)}</td>`;
     $("tb").innerHTML = rows.slice(0, shown).map(r => `<tr class="main" data-t="${esc(r.t)}" tabindex="0">
         <td class="n">${r.rank}</td>
-        <td><span class="tk">${esc(r.t)}</span> <span class="nm">${esc(r.n)}</span> ${r.isNew ? '<span class="chip new">New</span>' : ""}${r.warn.length ? ' <span class="chip warn">check</span>' : ""}</td>
+        <td><span class="tk">${esc(r.t)}</span> ${priceTag(r)} <span class="nm">${esc(r.n)}</span> ${r.isNew ? '<span class="chip new">New</span>' : ""}${r.warn.length ? ' <span class="chip warn">check</span>' : ""}</td>
         <td>${esc(r.grp)}</td>
         <td class="n"><span class="dots">${AT().map(t => `<i class="${r.ev[t.k].pass ? "on" : ""}"></i>`).join("")}</span></td>
         <td class="n">${r.score}<span class="bar"><i style="width:${r.score}%"></i></span></td>
@@ -772,7 +773,7 @@
     body.innerHTML = `
       <div class="an-head">
         <div><div class="eyebrow">${esc(kind === "stock" ? [r.sec, r.ind, r.exch, r.idx, r.r2k ? "Russell 2000 (approx.)" : ""].filter(Boolean).join(" · ") : r.cat || r.grp)}</div>
-          <h2 id="an-title">${esc(r.t)} <span class="muted">${esc(r.n)}</span></h2></div>
+          <h2 id="an-title">${esc(r.t)} ${priceTag(r)} <span class="muted">${esc(r.n)}</span></h2></div>
         <button type="button" class="ghost" data-close>Close</button>
       </div>
       <div class="an-verdict ${tone}">${esc(verdict)}</div>
