@@ -53,6 +53,18 @@
     shchg: { label: "Shares", title: "Share count change below", sfx: "%/yr", step: 0.5, unit: v => v, range: [3, -3],
       show: r => r.shchg == null ? "—" : (r.shchg > 0 ? "+" : "") + r.shchg.toFixed(1) + "%",
       hint: "Yearly change in shares outstanding. Negative means buybacks grow your slice; positive means you're being diluted." },
+    rg: { label: "Sales", title: "Revenue growth above", sfx: "%", step: 1, unit: v => v * 100, show: r => r.rg == null ? "—" : (r.rg >= 0 ? "+" : "") + pct(r.rg, 0),
+      hint: "Latest year's revenue growth. Up-and-coming companies grow sales well ahead of the economy." },
+    epsg: { label: "EPS est.", title: "Expected EPS growth above", sfx: "%", step: 1, unit: v => v * 100, show: r => r.epsg == null ? "—" : (r.epsg >= 0 ? "+" : "") + pct(r.epsg, 0),
+      hint: "Analysts' forecast for next year's earnings per share versus the last 12 months.",
+      bad: r => r.teps != null && r.teps <= 0 ? "Not profitable yet, so there's no earnings growth to measure." : null },
+    tup: { label: "Target", title: "Analyst target upside above", sfx: "%", step: 5, unit: v => v * 100, show: r => r.tup == null ? "—" : (r.tup >= 0 ? "+" : "") + pct(r.tup, 0),
+      hint: "How far analysts' average price target sits above today's price." },
+    prem: { label: "vs DCF", title: "Price above DCF value at most", sfx: "%", step: 10, unit: v => v * 100, range: [150, 0],
+      show: r => r.prem == null ? "—" : r.prem <= 0 ? pct(-r.prem, 0) + " below" : pct(r.prem, 0) + " above",
+      hint: "A loose valuation guard for growers: the DCF is strict, so this only rules out prices far beyond what the cash flow supports." },
+    ins: { label: "Insiders", title: "Insider ownership above", sfx: "%", step: 1, unit: v => v * 100, show: r => r.ins == null ? "—" : pct(r.ins, 1),
+      hint: "Share of the company owned by founders, executives and directors. Owners who stay invested tend to run it for the long term." },
     rgc: { label: "Rev. up", title: "Revenue grew in at least", sfx: "% of years", step: 10, unit: v => v, range: [33, 100],
       show: r => r.rgc == null ? "—" : Math.round(r.rgc) + "%",
       hint: "Share of years revenue was higher than the year before. Steady growers rarely go backwards." },
@@ -139,6 +151,8 @@
       <label class="opt"><input id="o-fin" type="checkbox"> Exclude financials and real estate <span style="color:var(--muted)">(D/E and ROIC don't apply to banks and REITs)</span></label>
       <div class="crit"><label for="o-mcap">Minimum market cap</label>
         <div class="field"><input id="o-mcap" type="number" step="0.5" min="0"><span>$ billion</span></div></div>
+      <div class="crit"><label for="o-mcapmax">Maximum market cap</label>
+        <div class="field"><input id="o-mcapmax" type="number" step="1" min="0"><span>$ billion (0 = no limit)</span></div></div>
       <hr>
       <div class="eyebrow">DCF assumptions</div>
       <div class="crit"><label for="o-disc">Discount rate</label>
@@ -248,9 +262,11 @@ ${topbar()}
 
   // ---------- settings ----------
   function defaults() {
-    const d = { off: Object.fromEntries((P.tests || []).filter(t => t.on === false).map(t => [t.k, true])), zoneOn: true, showSettings: true, low: CFG.lowPct, trendOn: CFG.trend.on, r2: CFG.trend.r2, retOn: CFG.returns.on, retMin: CFG.returns.min, period: CFG.returns.period, zmode: CFG.zone.mode, pull: CFG.zone.pullback, pullMax: CFG.zone.pullbackMax };
+    // site-wide chart/return/zone settings, with this page's own overrides (Rising stars relaxes them)
+    const tr = { ...CFG.trend, ...(P.trend || {}) }, rt = { ...CFG.returns, ...(P.returns || {}) }, zn = { ...CFG.zone, ...(P.zone || {}) };
+    const d = { off: Object.fromEntries((P.tests || []).filter(t => t.on === false).map(t => [t.k, true])), zoneOn: true, showSettings: true, low: CFG.lowPct, trendOn: tr.on, r2: tr.r2, retOn: rt.on, retMin: rt.min, period: rt.period, zmode: zn.mode, pull: zn.pullback, pullMax: zn.pullbackMax };
     for (const t of P.tests) d[t.k] = t.t;
-    if (isStock()) Object.assign(d, { uni: P.universe === "bc" ? "all" : P.universe, sector: !!P.sectorPE, fin: !!P.excludeFin, mcap: P.minCapB || 0, ...CFG.dcf });
+    if (isStock()) Object.assign(d, { uni: P.universe === "bc" ? "all" : P.universe, sector: !!P.sectorPE, fin: !!P.excludeFin, mcap: P.minCapB || 0, mcapMax: P.maxCapB || 0, ...CFG.dcf });
     return d;
   }
   function syncInputs() {
@@ -275,7 +291,7 @@ ${topbar()}
     $("zone-low").hidden = S.zmode !== "low"; $("zone-pull").hidden = S.zmode !== "pullback";
     if (isStock()) {
       if ($("o-sector")) $("o-sector").checked = S.sector;
-      $("o-fin").checked = S.fin; $("o-mcap").value = S.mcap;
+      $("o-fin").checked = S.fin; $("o-mcap").value = S.mcap; $("o-mcapmax").value = S.mcapMax;
       if ($("o-uni")) $("o-uni").value = S.uni;
       $("o-disc").value = S.disc; $("o-term").value = S.term; $("o-gcap").value = S.gcap;
     }
@@ -287,7 +303,13 @@ ${topbar()}
   // ---------- scoring ----------
   function evaluate(r) {
     const ev = {};
-    if (isStock()) { const v = dcf(r); r = { ...r, iv: v ? v.iv : null, dcfg: v ? v.g : null, mos: v ? v.mos : null }; }
+    if (isStock()) {
+      const v = dcf(r), mos = v ? v.mos : null;
+      r = { ...r, iv: v ? v.iv : null, dcfg: v ? v.g : null, mos,
+        prem: mos == null ? null : -mos,  // how far the price sits above DCF value
+        epsg: r.feps && r.teps && r.teps > 0 ? r.feps / r.teps - 1 : null,  // analysts' expected next-year EPS growth
+        tup: r.tgt && r.px ? r.tgt / r.px - 1 : null };  // analysts' mean target vs price
+    }
     for (const t of P.tests) {
       const m = META[t.k], v = r[t.k], T = S[t.k];
       if (v == null) { ev[t.k] = { pass: false, s: 0, na: true }; continue; }
@@ -334,6 +356,7 @@ ${topbar()}
     if (isStock() && P.universe !== "bc" && !(UNI_TEST[S.uni] || UNI_TEST.all)(r)) return false;
     if (isStock() && S.fin && FIN.has(r.sec)) return false;
     if (isStock() && (r.mc || 0) < S.mcap * 1e9) return false;
+    if (isStock() && S.mcapMax && (r.mc || 0) > S.mcapMax * 1e9) return false;
     return true;
   }
 
@@ -601,7 +624,7 @@ ${topbar()}
     $("o-trend").addEventListener("change", e => { S.trendOn = e.target.checked; save(); syncInputs(); renderAll(); });
     $("o-zmode").addEventListener("change", e => { S.zmode = e.target.value; save(); syncInputs(); renderAll(); });
     if (isStock()) {
-      num("o-mcap", "mcap");
+      num("o-mcap", "mcap"); num("o-mcapmax", "mcapMax");
       if ($("o-uni")) $("o-uni").addEventListener("change", e => { S.uni = e.target.value; shown = 60; renderAll(); }); num("o-disc", "disc"); num("o-term", "term"); num("o-gcap", "gcap");
       if ($("o-sector")) $("o-sector").addEventListener("change", e => { S.sector = e.target.checked; save(); renderAll(); });
       $("o-fin").addEventListener("change", e => { S.fin = e.target.checked; save(); renderAll(); });
@@ -669,6 +692,7 @@ ${topbar()}
     if (isStock() && P.universe !== "bc" && !(UNI_TEST[S.uni] || UNI_TEST.all)(r)) out.push(`outside "${uniLabel()}"`);
     if (isStock() && S.fin && FIN.has(r.sec)) out.push("financials and real estate are excluded");
     if (isStock() && (r.mc || 0) < S.mcap * 1e9) out.push(`below the $${S.mcap}B minimum size`);
+    if (isStock() && S.mcapMax && (r.mc || 0) > S.mcapMax * 1e9) out.push(`above the $${S.mcapMax}B maximum size`);
     if (S.trendOn && !steady(r)) out.push("not a steady 5-year uptrend");
     return out;
   }
@@ -715,6 +739,7 @@ ${topbar()}
       add(r.shchg != null && r.shchg <= -1, S_, `Buying back shares: count shrinking ${fx(-r.shchg, 1)}% a year`);
       add(r.shchg != null && r.shchg >= 3, W, `Diluting shareholders: share count growing ${fx(r.shchg, 1)}% a year`);
       add(r.rgc === 100, S_, "Revenue grew every year on record");
+      add(r.ins != null && r.ins >= 0.1, S_, `Insiders own ${pct(r.ins, 0)} of the company`);
       add(r.rgc != null && r.rgc < 50, W, `Revenue fell in more years than it grew (${Math.round(100 - r.rgc)}% of years down)`);
     } else {
       add(r.er != null && r.er <= 0.10, S_, `Very low cost: ${r.er.toFixed(2)}% a year`);

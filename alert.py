@@ -57,7 +57,8 @@ UNIVERSE = {
 }
 
 # Raw value -> threshold units, and which values count as invalid (always fail). Mirrors META in docs/app.js.
-UNIT = {"roic": 100, "fcfy": 100, "r5": 100, "yld": 100, "aum": 1e-9, "roemin": 100, "mos": 100, "roicmin": 100}
+UNIT = {"roic": 100, "fcfy": 100, "r5": 100, "yld": 100, "aum": 1e-9, "roemin": 100, "mos": 100, "roicmin": 100,
+        "rg": 100, "epsg": 100, "tup": 100, "ins": 100, "prem": 100}
 VALID = {"peg": lambda v: v > 0, "pe": lambda v: v > 0, "de": lambda v: v >= 0}
 
 
@@ -68,9 +69,9 @@ def log(msg):
         f.write(line + "\n")
 
 
-def ret_for(r):
+def ret_for(r, period=None):
     """Average yearly gain for the configured period; mirrors retFor() in docs/app.js."""
-    p = RETURNS["period"]
+    p = period or RETURNS["period"]
     if p == "y5":
         return r.get("cagr5")
     if p == "y10":
@@ -104,10 +105,24 @@ def active(page):
     return [t for t in page["tests"] if t.get("on", True)]
 
 
+def derived(r, k):
+    """Values the tests compute from raw fields; mirrors evaluate() in docs/app.js."""
+    if k == "mos":
+        return dcf(r)[1]
+    if k == "prem":  # how far the price sits above DCF value
+        mos = dcf(r)[1]
+        return None if mos is None else -mos
+    if k == "epsg":  # analysts' expected next-year EPS growth
+        return r["feps"] / r["teps"] - 1 if r.get("feps") and r.get("teps") and r["teps"] > 0 else None
+    if k == "tup":  # analysts' mean target vs price
+        return r["tgt"] / r["px"] - 1 if r.get("tgt") and r.get("px") else None
+    return r.get(k)
+
+
 def passes(r, page, medians):
     n = 0
     for t in active(page):
-        v = dcf(r)[1] if t["k"] == "mos" else r.get(t["k"])
+        v = derived(r, t["k"])
         if v is None or not VALID.get(t["k"], lambda _: True)(v):
             continue
         x = v * UNIT.get(t["k"], 1)
@@ -119,17 +134,24 @@ def passes(r, page, medians):
     return n
 
 
+def settings(page, key):
+    """Global chart/return/zone settings with this page's overrides (e.g. Rising stars relaxes them)."""
+    return {**CONFIG[key], **page.get(key, {})}
+
+
 def eligible(r, page):
     """Same page filters as inUniverse() in docs/app.js: universe, size, sector, chart shape, returns."""
     if not UNIVERSE[page["universe"]](r):
         return False
     if page["kind"] == "stock" and (
             (page.get("excludeFin") and r["sec"] in EXCLUDE_SECTORS)
-            or (r.get("mc") or 0) < page.get("minCapB", 0) * 1e9):
+            or (r.get("mc") or 0) < page.get("minCapB", 0) * 1e9
+            or (page.get("maxCapB") and (r.get("mc") or 0) > page["maxCapB"] * 1e9)):
         return False
-    if TREND["on"] and not (r.get("r2") or -1) >= TREND["r2"]:
+    tr, rt = settings(page, "trend"), settings(page, "returns")
+    if tr["on"] and not (r.get("r2") or -1) >= tr["r2"]:
         return False
-    if RETURNS["on"] and not (ret_for(r) is not None and ret_for(r) * 100 >= RETURNS["min"]):
+    if rt["on"] and not ((v := ret_for(r, rt["period"])) is not None and v * 100 >= rt["min"]):
         return False
     return True
 
@@ -244,7 +266,7 @@ def build_email(hits):
         ]
         rows.append("<tr>" + "".join(td + c + "</td>" for c in cells) + "</tr>")
     subject = ("Pullback alert: " if pb else "52-week low alert: ") + ", ".join(h["t"] for h in hits)
-    zone_desc = (f"{ZONE['pullback']}–{ZONE['pullbackMax']}% below their 52-week high while the 5-year uptrend holds" if pb
+    zone_desc = ("in their screen's buy zone: pulled back from the 52-week high while the long-term uptrend holds" if pb
                  else f"within {LOW_PCT * 100:.0f}% of their 52-week low")
     text = f"Shortlisted names {zone_desc}:\n\n" + "\n".join(lines) + f"\n\nOpen the site: {PAGE_URL}\n"
     th = "".join(f"<th align='left' style='padding:6px 10px;border-bottom:1px solid #dde3ea'>{c}</th>" for c in
@@ -302,8 +324,9 @@ def main():
         from_low = g["px"] / g["lo52"] - 1
         from_high = g["px"] / g["hi52"] - 1 if g["hi52"] else 0
         # a pullback deeper than pullbackMax is a broken trend, not a dip
-        in_zone = (-ZONE["pullbackMax"] / 100 <= from_high <= -ZONE["pullback"] / 100
-                   if ZONE["mode"] == "pullback" else from_low <= LOW_PCT)
+        z = settings(CONFIG["pages"][r["pid"]], "zone")  # pages can widen the zone (Rising stars)
+        in_zone = (-z["pullbackMax"] / 100 <= from_high <= -z["pullback"] / 100
+                   if z["mode"] == "pullback" else from_low <= LOW_PCT)
         if in_zone and (args.force or state.get(r["t"]) != today):
             hits.append({**r, **g, "from_low": from_low, "from_high": from_high})
     hits.sort(key=lambda h: h["from_high"] if ZONE["mode"] == "pullback" else h["from_low"])

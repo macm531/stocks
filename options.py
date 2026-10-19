@@ -250,6 +250,8 @@ def main():
 
     if len(cands) > 20 and len(out) < len(cands) * 0.5:
         sys.exit(f"Only {len(out)} of {len(cands)} stocks returned option data (throttled?); not saving.")
+    if len(cands) > 20 and sum(len(s["c"]) for s in out) < len(out):
+        sys.exit("Almost no quotable contracts (market closed, so bids are zero?); not saving.")
 
     # append today's ATM IV to the history (one reading per day, ~400 days kept)
     for s in out:

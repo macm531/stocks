@@ -121,6 +121,103 @@
         }
       ]
     },
+    "rising": {
+      "file": "rising.html",
+      "nav": "Rising stars",
+      "title": "Rising Stars",
+      "eyebrow": "$300M\u2013$10B \u00b7 growing fast, financially solid, not overpriced",
+      "intro": "Smaller companies that are growing sales and earnings quickly, earn high returns on their capital, carry little debt and don't dilute shareholders, at prices that haven't run away from the business. Charts and returns are judged over 5 years, since many of these companies are young.",
+      "kind": "stock",
+      "data": "scan.json",
+      "universe": "all",
+      "excludeFin": true,
+      "minCapB": 0.3,
+      "maxCapB": 10,
+      "sectorPE": false,
+      "trend": {
+        "r2": 0.6
+      },
+      "returns": {
+        "min": 10,
+        "period": "y5"
+      },
+      "zone": {
+        "pullback": 15,
+        "pullbackMax": 40
+      },
+      "tests": [
+        {
+          "k": "rg",
+          "dir": "gt",
+          "t": 15
+        },
+        {
+          "k": "epsg",
+          "dir": "gt",
+          "t": 15
+        },
+        {
+          "k": "peg",
+          "dir": "lt",
+          "t": 1.5
+        },
+        {
+          "k": "pe",
+          "dir": "lt",
+          "t": 30
+        },
+        {
+          "k": "de",
+          "dir": "lt",
+          "t": 0.5
+        },
+        {
+          "k": "roic",
+          "dir": "gt",
+          "t": 15
+        },
+        {
+          "k": "icov",
+          "dir": "gt",
+          "t": 8
+        },
+        {
+          "k": "shchg",
+          "dir": "lt",
+          "t": 2
+        },
+        {
+          "k": "rgc",
+          "dir": "ge",
+          "t": 75,
+          "on": false
+        },
+        {
+          "k": "fcfy",
+          "dir": "gt",
+          "t": 2,
+          "on": false
+        },
+        {
+          "k": "tup",
+          "dir": "gt",
+          "t": 10,
+          "on": false
+        },
+        {
+          "k": "prem",
+          "dir": "lt",
+          "t": 50,
+          "on": false
+        },
+        {
+          "k": "ins",
+          "dir": "gt",
+          "t": 5,
+          "on": false
+        }
+      ]
+    },
     "bluechip": {
       "file": "bluechips.html",
       "nav": "Blue chips",

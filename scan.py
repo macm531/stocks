@@ -256,6 +256,7 @@ def _fetch(sym, index):
         "tlo": num(i.get("targetLowPrice")), "thi": num(i.get("targetHighPrice")),
         "feps": num(i.get("forwardEps")), "teps": num(i.get("trailingEps")),
         "earn": num(i.get("earningsTimestamp")),
+        "ins": num(i.get("heldPercentInsiders")),  # share of stock owned by insiders (founders, management)
         "ma50": num(i.get("fiftyDayAverage")), "ma200": num(i.get("twoHundredDayAverage")),
         "_co": {  # longer text goes to docs/co/<ticker>.json, loaded only when a report opens
             "sum": i.get("longBusinessSummary") or "",
