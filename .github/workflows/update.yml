@@ -15,7 +15,7 @@ on:
       mode:
         description: "What to run"
         type: choice
-        options: [prices, scan, deploy]
+        options: [prices, scan, fullscan, deploy]
         default: prices
 
 permissions:
@@ -37,7 +37,7 @@ jobs:
     env:
       SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-      DATA_FILES: docs/scan.json docs/etfs.json docs/live.json universe.json alerts_state.json alerts.log
+      DATA_FILES: docs/scan.json docs/etfs.json docs/live.json docs/track.json universe.json alerts_state.json alerts.log
     steps:
       - uses: actions/checkout@v4
 
@@ -69,12 +69,20 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Rescan fundamentals (stalest first, within budget)
-        if: steps.mode.outputs.mode == 'scan'
-        run: python etf.py && python scan.py --budget 75 && python alert.py --force --prices-only  # ETFs first, before Yahoo throttles
+        if: steps.mode.outputs.mode == 'scan' || steps.mode.outputs.mode == 'fullscan'
+        run: |
+          # ETFs first, before Yahoo throttles; fullscan refreshes every stock regardless of age
+          python etf.py
+          if [ "${{ steps.mode.outputs.mode }}" = "fullscan" ]; then python scan.py --stale-hours 0 --budget 95
+          else python scan.py --budget 75; fi
+          python alert.py --force --prices-only
+          python track.py
 
       - name: Refresh prices and send alerts
         if: steps.mode.outputs.mode == 'prices'
-        run: python alert.py ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
+        run: |
+          python alert.py ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
+          python track.py --prices
 
       - name: Save data branch
         if: steps.mode.outputs.mode != 'deploy'

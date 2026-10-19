@@ -5,6 +5,7 @@ Writes docs/etfs.json. Metrics (raw; the page applies thresholds):
   pe    trailing P/E of holdings      r5    5-year average annual return
   r3    3-year average annual return  yld   distribution yield
   beta  3-year beta                   lo52/hi52/px  52-week range and last close
+  top   top 10 holdings [symbol, name, weight]; the page scores them on the stock screens
 """
 import json
 import time
@@ -40,9 +41,17 @@ def num(x):
 def fetch(sym, group, tries=3):
     for attempt in range(tries):
         try:
-            i = yf.Ticker(sym).info or {}
+            tk = yf.Ticker(sym)
+            i = tk.info or {}
             if i.get("quoteType") != "ETF":
                 return None
+            top = []
+            try:  # top 10 holdings: [symbol, name, weight]
+                th = tk.funds_data.top_holdings
+                top = [[str(t), str(n), round(float(w), 4)] for t, n, w in
+                       zip(th.index, th["Name"], th["Holding Percent"])][:10]
+            except Exception:
+                pass
             return {
                 "t": sym, "n": i.get("longName") or i.get("shortName") or sym, "grp": group,
                 "cat": i.get("category") or "", "fam": i.get("fundFamily") or "",
@@ -51,6 +60,7 @@ def fetch(sym, group, tries=3):
                 "r5": num(i.get("fiveYearAverageReturn")), "r3": num(i.get("threeYearAverageReturn")),
                 "yld": num(i.get("yield")), "beta": num(i.get("beta3Year")),
                 "ytd": num(i.get("ytdReturn")),
+                "top": top,
             }
         except Exception:
             time.sleep(2 * (attempt + 1))

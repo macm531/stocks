@@ -57,7 +57,7 @@ UNIVERSE = {
 }
 
 # Raw value -> threshold units, and which values count as invalid (always fail). Mirrors META in docs/app.js.
-UNIT = {"roic": 100, "fcfy": 100, "r5": 100, "yld": 100, "aum": 1e-9, "roemin": 100, "mos": 100}
+UNIT = {"roic": 100, "fcfy": 100, "r5": 100, "yld": 100, "aum": 1e-9, "roemin": 100, "mos": 100, "roicmin": 100}
 VALID = {"peg": lambda v: v > 0, "pe": lambda v: v > 0, "de": lambda v: v >= 0}
 
 
@@ -99,9 +99,14 @@ def dcf(r):
     return iv, (1 - r["px"] / iv if iv > 0 and r.get("px") else None)
 
 
+def active(page):
+    """Tests switched on by default (config "on": false keeps a test available but off)."""
+    return [t for t in page["tests"] if t.get("on", True)]
+
+
 def passes(r, page, medians):
     n = 0
-    for t in page["tests"]:
+    for t in active(page):
         v = dcf(r)[1] if t["k"] == "mos" else r.get(t["k"])
         if v is None or not VALID.get(t["k"], lambda _: True)(v):
             continue
@@ -114,24 +119,46 @@ def passes(r, page, medians):
     return n
 
 
+def eligible(r, page):
+    """Same page filters as inUniverse() in docs/app.js: universe, size, sector, chart shape, returns."""
+    if not UNIVERSE[page["universe"]](r):
+        return False
+    if page["kind"] == "stock" and (
+            (page.get("excludeFin") and r["sec"] in EXCLUDE_SECTORS)
+            or (r.get("mc") or 0) < page.get("minCapB", 0) * 1e9):
+        return False
+    if TREND["on"] and not (r.get("r2") or -1) >= TREND["r2"]:
+        return False
+    if RETURNS["on"] and not (ret_for(r) is not None and ret_for(r) * 100 >= RETURNS["min"]):
+        return False
+    return True
+
+
+def min_passes(page):
+    """Shortlist bar: every active test but one (4 of 5, 7 of 8)."""
+    return max(1, len(active(page)) - 1)
+
+
+def load_data():
+    data = {}
+    for page in CONFIG["pages"].values():
+        if page.get("data"):
+            data.setdefault(page["data"], json.loads((ROOT / "docs" / page["data"]).read_text()))
+    return data
+
+
 def watchlist():
     """Every shortlisted name across the site's pages, tagged with the page it qualifies on."""
-    data, out = {}, {}
+    data, out = load_data(), {}
     for pid, page in CONFIG["pages"].items():
-        d = data.setdefault(page["data"], json.loads((ROOT / "docs" / page["data"]).read_text()))
+        if page["kind"] not in ("stock", "etf"):
+            continue
+        d = data[page["data"]]
         for r in d["rows"]:
-            if not UNIVERSE[page["universe"]](r):
-                continue
-            if page["kind"] == "stock" and (
-                    (page.get("excludeFin") and r["sec"] in EXCLUDE_SECTORS)
-                    or (r.get("mc") or 0) < page.get("minCapB", 0) * 1e9):
-                continue
-            if TREND["on"] and not (r.get("r2") or -1) >= TREND["r2"]:
-                continue
-            if RETURNS["on"] and not (ret_for(r) is not None and ret_for(r) * 100 >= RETURNS["min"]):
+            if not eligible(r, page):
                 continue
             n = passes(r, page, d.get("medians", {}))
-            if n >= MIN_PASSES and r["t"] not in out:
+            if n >= min_passes(page) and r["t"] not in out:
                 out[r["t"]] = {**r, "passes": n, "page": page["nav"], "pid": pid, "kind": page["kind"], "url_file": page["file"]}
     return list(out.values())
 
@@ -205,14 +232,14 @@ def build_email(hits):
     for h in hits:
         trend = f"R² {h.get('r2') or 0:.2f}, {(ret_for(h) or 0) * 100:+.0f}%/yr avg"
         lines.append(f"[{h['page']}] {h['t']} {h['n']}: ${h['px']:.2f}, {zone_txt(h)} | 5-yr trend {trend} "
-                     f"| {h['passes']}/5 tests | {metrics_line(h)}")
+                     f"| {h['passes']} tests passed | {metrics_line(h)}")
         ref = h["hi52"] if pb else h["lo52"]
         dist = f"{h['from_high'] * 100:.1f}%" if pb else f"+{h['from_low'] * 100:.1f}%"
         cells = [
             f"<b><a href='https://finance.yahoo.com/quote/{escape(h['t'])}'>{escape(h['t'])}</a></b><br>"
             f"<span style='color:#5d6b7a'>{escape(h['n'])}</span>",
             f"<a href='{PAGE_URL}{h['url_file']}'>{escape(h['page'])}</a>",
-            f"${h['px']:.2f}", f"${ref:.2f}", f"<b>{dist}</b>", escape(trend), f"{h['passes']}/5",
+            f"${h['px']:.2f}", f"${ref:.2f}", f"<b>{dist}</b>", escape(trend), f"{h['passes']}/{len(active(CONFIG['pages'][h['pid']]))}",
             f"<span style='color:#5d6b7a'>{escape(metrics_line(h))}</span>",
         ]
         rows.append("<tr>" + "".join(td + c + "</td>" for c in cells) + "</tr>")
@@ -224,8 +251,8 @@ def build_email(hits):
                  ["Name", "Page", "Price", "52w high" if pb else "52w low", "From high" if pb else "Above low",
                   "5-yr trend", "Tests", "Metrics"])
     html = ("<div style='font-family:-apple-system,Segoe UI,sans-serif;color:#15202b'>"
-            "<h2 style="margin:0 0 6px">MacStocks buy-zone alert</h2>"
-            f"<p style='margin:0 0 14px;color:#5d6b7a'>These pass {MIN_PASSES}+ of the 5 tests on their page and trade "
+            "<h2 style='margin:0 0 6px'>MacStocks buy-zone alert</h2>"
+            "<p style='margin:0 0 14px;color:#5d6b7a'>These pass all but at most one test on their page and trade "
             f"{zone_desc}.</p>"
             f"<table cellspacing='0' style='border-collapse:collapse;font-size:14px'><tr>{th}</tr>{''.join(rows)}</table>"
             f"<p><a href='{PAGE_URL}'>Open the site</a></p>"

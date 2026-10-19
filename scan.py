@@ -106,13 +106,29 @@ def history(inc, bs, cf):
     if not fcf:
         ocf, capex = series(cf, "Operating Cash Flow"), series(cf, "Capital Expenditure")
         fcf = {y: ocf[y] + capex.get(y, 0) for y in ocf}
+    shares = series(inc, "Diluted Average Shares", "Basic Average Shares") or series(bs, "Ordinary Shares Number", "Share Issued")
+    ebit = series(inc, "EBIT", "Operating Income")
+    tax = series(inc, "Tax Rate For Calcs")
+    debt = series(bs, "Total Debt")
+    cash = series(bs, "Cash Cash Equivalents And Short Term Investments", "Cash And Cash Equivalents")
+
+    def roic(y):
+        if y not in ebit or y not in eq:
+            return None
+        invested = debt.get(y, 0) + eq[y] - cash.get(y, 0)
+        t = min(max(tax.get(y, 0.21), 0), 0.35)
+        return ebit[y] * (1 - t) / invested if invested > 0 else None
+
     years = sorted(set(ni) | set(fcf))
     rnd = lambda x, d=4: None if x is None else round(x, d)
     h = {
         "y": years,
         "roe": [rnd(ni[y] / eq[y]) if y in ni and eq.get(y, 0) > 0 else None for y in years],
+        "roic": [rnd(roic(y)) for y in years],
         "nm": [rnd(ni[y] / rev[y]) if y in ni and rev.get(y, 0) > 0 else None for y in years],
+        "rev": [rev.get(y) for y in years],
         "fcf": [fcf.get(y) for y in years],
+        "sh": [shares.get(y) for y in years],
     }
     return h
 
@@ -130,6 +146,14 @@ def derived(h, debt, cash, ni_latest):
         "fcfc": 100 * sum(1 for x in fcf if x > 0) / len(fcf) if len(fcf) >= 3 else None,
         "dny": (debt or 0) / ni_latest if ni_latest and ni_latest > 0 else None,
         "fcf0": sum(fcf[-3:]) / len(fcf[-3:]) if fcf else None,
+        # lowest yearly ROIC in the record: consistency, not one good year
+        "roicmin": min(rc) if len(rc := [x for x in h.get("roic", []) if x is not None]) >= 3 else None,
+        # share of years revenue grew vs the year before
+        "rgc": (100 * sum(1 for a, b in zip(rv, rv[1:]) if b > a) / (len(rv) - 1)
+                if len(rv := [x for x in h.get("rev", []) if x is not None]) >= 3 else None),
+        # share count change per year, in % (negative = buybacks shrink the count, positive = dilution)
+        "shchg": ((sh[-1] / sh[0]) ** (1 / (len(sh) - 1)) - 1) * 100
+                 if len(sh := [x for x in h.get("sh", []) if x]) >= 3 and sh[0] > 0 else None,
         "netcash": (cash or 0) - (debt or 0),
     }
     # FCF growth: CAGR from first to last positive year; the page caps it
@@ -186,6 +210,14 @@ def _fetch(sym, index):
 
     h = history(inc, bs, cf)
     ni_latest = row(inc, "Net Income Common Stockholders", "Net Income")
+    # interest coverage: operating profit / interest owed (latest year that reports interest)
+    interest = row(inc, "Interest Expense", "Interest Expense Non Operating")
+    if ebit is None:
+        icov = None
+    elif not interest:
+        icov = 999.0 if ebit > 0 else None  # profitable and no interest reported: effectively no debt burden
+    else:
+        icov = round(ebit / abs(interest), 1)
     fcf = num(i.get("freeCashflow"))
     fcfy = fcf / mcap if fcf is not None and mcap else None
 
@@ -212,6 +244,7 @@ def _fetch(sym, index):
         "tgt": num(i.get("targetMeanPrice")),
         "chg52": num(i.get("52WeekChange")),
         "sh": num(i.get("sharesOutstanding") or i.get("impliedSharesOutstanding")),
+        "icov": icov,
         "h": h,
         **derived(h, debt, cash, ni_latest),
     }
