@@ -39,6 +39,24 @@
           "k": "pe",
           "dir": "lt",
           "t": 25
+        },
+        {
+          "k": "roicmin",
+          "dir": "gt",
+          "t": 12,
+          "on": false
+        },
+        {
+          "k": "icov",
+          "dir": "gt",
+          "t": 5,
+          "on": false
+        },
+        {
+          "k": "shchg",
+          "dir": "lt",
+          "t": 1,
+          "on": false
         }
       ]
     },
@@ -47,7 +65,7 @@
       "nav": "Buffett",
       "title": "Buffett Moat Screen",
       "eyebrow": "NYSE + Nasdaq \u00b7 consistent returns, low debt, margin of safety",
-      "intro": "Warren Buffett's checklist: ROE of 15%+ every year, debt the business could repay from a few years of profit, widening margins, cash flow every year, and a price well below a discounted-cash-flow estimate of intrinsic value.",
+      "intro": "Warren Buffett's checklist: ROE of 15%+ every year, debt the business could repay from a few years of profit, widening margins, cash flow every year, ROIC that stays high, interest it can easily cover, no shareholder dilution, and a price well below a discounted-cash-flow estimate of intrinsic value.",
       "kind": "stock",
       "data": "scan.json",
       "universe": "all",
@@ -79,6 +97,27 @@
           "k": "mos",
           "dir": "gt",
           "t": 25
+        },
+        {
+          "k": "roicmin",
+          "dir": "gt",
+          "t": 12
+        },
+        {
+          "k": "icov",
+          "dir": "gt",
+          "t": 5
+        },
+        {
+          "k": "shchg",
+          "dir": "lt",
+          "t": 1
+        },
+        {
+          "k": "rgc",
+          "dir": "ge",
+          "t": 67,
+          "on": false
         }
       ]
     },
@@ -119,6 +158,24 @@
           "k": "pe",
           "dir": "lt",
           "t": 25
+        },
+        {
+          "k": "roicmin",
+          "dir": "gt",
+          "t": 12,
+          "on": false
+        },
+        {
+          "k": "icov",
+          "dir": "gt",
+          "t": 5,
+          "on": false
+        },
+        {
+          "k": "shchg",
+          "dir": "lt",
+          "t": 1,
+          "on": false
         }
       ]
     },
@@ -158,6 +215,18 @@
           "t": 1.5
         }
       ]
+    },
+    "mine": {
+      "file": "mine.html",
+      "nav": "My stocks",
+      "title": "My Stocks",
+      "kind": "mine"
+    },
+    "track": {
+      "file": "track.html",
+      "nav": "Track record",
+      "title": "Track Record",
+      "kind": "track"
     }
   },
   "dcf": {
@@ -186,5 +255,13 @@
     "on": true,
     "min": 10,
     "period": "long"
+  },
+  "sell": {
+    "failTests": 2,
+    "overDcf": 100,
+    "drawdown": 30,
+    "stop": 25,
+    "choppy": 0.5,
+    "persistDays": 90
   }
 }

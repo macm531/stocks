@@ -61,6 +61,7 @@ def fetch(sym, group, tries=3):
                 "yld": num(i.get("yield")), "beta": num(i.get("beta3Year")),
                 "ytd": num(i.get("ytdReturn")),
                 "top": top,
+                "_co": {"sum": i.get("longBusinessSummary") or "", "web": None},
             }
         except Exception:
             time.sleep(2 * (attempt + 1))
@@ -97,6 +98,8 @@ def main():
     for r in rows:
         r.update({k: v for k, v in rng.get(r["t"], {}).items()})
         r.update(tr.get(r["t"], {}))
+    from scan import write_co  # fund description -> docs/co/<ticker>.json
+    write_co([r for r in rows if "_co" in r])
     rows.sort(key=lambda r: r["t"])
     OUT.write_text(json.dumps({
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

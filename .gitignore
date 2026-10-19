@@ -9,6 +9,8 @@ scan.log
 docs/scan.json
 docs/etfs.json
 docs/live.json
+docs/track.json
 universe.json
 alerts_state.json
 scan_partial.json
+docs/co/

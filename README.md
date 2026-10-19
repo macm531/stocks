@@ -26,3 +26,26 @@ Two-stage model in `docs/app.js` (`dcf`) and mirrored in `alert.py`: average of 
 
 ## Chart shape + buy zone
 `ranges.trend_stats` fits log(weekly close) over 5 years: `r2` (steadiness, negative when falling), `cagr5`, `maxdd`, `spark` (mini chart). `config.json` → `trend` filters every page to steady uptrends (default R² ≥ 0.75, ≥ 10%/yr); `zone` picks the buy zone: `pullback` (10–30% below the 52-week high, default) or `low` (within `lowPct` of the 52-week low). Alerts use the same settings.
+
+## Quality metrics (added 2026-10-19)
+`scan.py` also records yearly ROIC, revenue and share counts: `roicmin` (lowest yearly ROIC), `rgc` (% of years revenue grew), `shchg` (share count change %/yr; negative = buybacks), `icov` (EBIT / interest; 999 = profitable with no interest reported). Buffett page tests them by default; Value and Blue chips have them as optional tests (`"on": false` in config).
+
+## My stocks (`mine.html`) and sell signals
+Holdings live in the viewer's browser (localStorage `macstocks-holdings`); "Copy my list" moves them between devices. Each holding is judged on a chosen screen with default settings. Warnings (`config.json` → `sell`): fails 2+ tests, price 100%+ above DCF value, 30%+ below 52-week high, down 25%+ from buy price, chart R² under 0.5. One warning = Review; two, or failing for 90+ days, = Sell signal.
+
+## Track record (`track.html`, `track.py`)
+Weekly snapshot per screen of every full match (default settings) with its price and SPY's, in `docs/track.json` on the data branch. The page compares equal-weight pick returns with SPY since each snapshot. Forward-only, so no look-ahead bias; price returns only.
+
+## ETF holdings
+`etf.py` stores each fund's top 10 holdings; the ETF page and Analyze report score them on the Value and Buffett screens (foreign listings map to US listings only when names match).
+
+## Company reports (free data)
+Clicking any stock or ETF opens the Analyze report. Besides scores it shows:
+- **Company outlook**: generated from Yahoo profile data captured by `scan.py` (analyst rating/targets, expected EPS growth, revenue trend, DCF gap, next earnings date) plus the business description in `docs/co/<ticker>.json`.
+- **Which way it's heading**: rule-based signals (price vs 200-day, 50 vs 200-day, 5-year trend, distance from high, analyst rating and target, EPS outlook, sales momentum). Describes momentum and expectations; not a forecast.
+- **Annual meeting**: `details.py` reads SEC EDGAR (contact address in the User-Agent per SEC fair-access policy) for the latest 8-K Item 5.07 (voting results, quoted from the filing), proxy statement and 10-K, weekly, for S&P 500 + shortlists + past picks.
+- **Recent headlines**: Yahoo search news, daily for the same set plus all ETFs.
+`docs/co/` lives on the data branch with the other data files.
+
+## Voice reader
+Browser speech synthesis (free, no service): "Listen" in the top bar reads the page or any selected text; every report section has its own Listen button; selecting text shows "Read this". Speed is remembered per browser.

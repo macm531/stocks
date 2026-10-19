@@ -45,6 +45,17 @@
       show: r => r.mos == null ? "—" : pct(r.mos, 0),
       hint: "How far the price sits below the DCF intrinsic value. Buffett wants 20–30%+ as a buffer.",
       bad: r => r.iv != null && r.iv <= 0 ? "DCF value is negative (debt exceeds cash-flow value)." : r.fcf0 != null && r.fcf0 <= 0 ? "Negative average free cash flow; DCF not meaningful." : null },
+    roicmin: { label: "ROIC min", title: "ROIC every year above", sfx: "%", step: 1, unit: v => v * 100, show: r => pct(r.roicmin, 0),
+      hint: "Lowest yearly return on invested capital in the record. Consistently high ROIC is the clearest sign of a moat." },
+    icov: { label: "Int. cover", title: "Interest coverage above", sfx: "×", step: 1, unit: v => v, range: [1, 15],
+      show: r => r.icov == null ? "—" : r.icov >= 999 ? "no debt" : r.icov.toFixed(1) + "×",
+      hint: "Operating profit divided by interest owed. Under 3× means a bad year could make the debt hard to carry." },
+    shchg: { label: "Shares", title: "Share count change below", sfx: "%/yr", step: 0.5, unit: v => v, range: [3, -3],
+      show: r => r.shchg == null ? "—" : (r.shchg > 0 ? "+" : "") + r.shchg.toFixed(1) + "%",
+      hint: "Yearly change in shares outstanding. Negative means buybacks grow your slice; positive means you're being diluted." },
+    rgc: { label: "Rev. up", title: "Revenue grew in at least", sfx: "% of years", step: 10, unit: v => v, range: [33, 100],
+      show: r => r.rgc == null ? "—" : Math.round(r.rgc) + "%",
+      hint: "Share of years revenue was higher than the year before. Steady growers rarely go backwards." },
   };
 
   // Average yearly gain (dividends included) for the chosen period.
@@ -97,14 +108,26 @@
   const on = t => !(S.off && S.off[t.k]);
   const AT = () => P.tests.filter(on);
   const NT = () => AT().length;
-  const zmin = () => Math.min(CFG.minPasses, NT());
+  const zmin = () => Math.max(1, NT() - 1);  // shortlist = every test you have on but one
   const isStock = () => P.kind === "stock";
 
   // ---------- layout ----------
-  function shell() {
-    document.title = `${P.title} · MacStocks`;
+  function topbar() {
     const nav = Object.entries(CFG.pages).map(([id, p]) =>
       `<a class="tab" href="${p.file}"${id === PID ? ' aria-current="page"' : ""}>${esc(p.nav)}</a>`).join("");
+    return `  <nav class="topnav" aria-label="Pages"><a class="brand" href="index.html" aria-label="MacStocks home"><img src="logo.svg" alt="" width="30" height="30">MacStocks</a>${nav}
+    <form class="lookup" id="lookup" role="search" autocomplete="off">
+      <input id="lk" list="lk-list" placeholder="Analyze a ticker" aria-label="Ticker to analyze" spellcheck="false" autocapitalize="characters">
+      <button type="submit">Analyze</button>
+      <button type="button" class="listen listen-top" id="listen-page" data-listen title="Read this page aloud (or select text first)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg><span>Listen</span></button>
+      <datalist id="lk-list"></datalist>
+    </form>
+  </nav>
+  <dialog id="an" aria-labelledby="an-title"><div class="an-inner" id="an-body"></div></dialog>`;
+  }
+
+  function shell() {
+    document.title = `${P.title} · MacStocks`;
     const crit = P.tests.map(t => { const m = META[t.k]; return `
       <div class="crit" id="crit-${t.k}">
         <div class="crit-top"><label class="sw"><input type="checkbox" id="on-${t.k}" aria-label="Use ${m.title}"><i></i><span>${m.title}</span></label><span class="cnt" id="c-${t.k}"></span></div>
@@ -130,14 +153,7 @@
       ? `${P.tests.some(t => t.k === "mos") ? "" : `<th data-k="mos" class="r">Safety</th>`}<th data-k="iv" class="r">DCF value</th><th data-k="mc" class="r">Mkt cap</th>`
       : `<th data-k="r3" class="r">3-yr</th><th data-k="beta" class="r">Beta</th>`;
     document.getElementById("app").innerHTML = `
-  <nav class="topnav" aria-label="Pages"><a class="brand" href="index.html" aria-label="MacStocks home"><img src="logo.svg" alt="" width="30" height="30">MacStocks</a>${nav}
-    <form class="lookup" id="lookup" role="search" autocomplete="off">
-      <input id="lk" list="lk-list" placeholder="Analyze a ticker" aria-label="Ticker to analyze" spellcheck="false" autocapitalize="characters">
-      <button type="submit">Analyze</button>
-      <datalist id="lk-list"></datalist>
-    </form>
-  </nav>
-  <dialog id="an" aria-labelledby="an-title"><div class="an-inner" id="an-body"></div></dialog>
+${topbar()}
   <header>
     <div>
       <div class="eyebrow">${esc(P.eyebrow)}</div>
@@ -180,7 +196,7 @@
         <select id="o-zmode" class="zsel"><option value="pullback">Pullback from 52-week high</option><option value="low">Near 52-week low</option></select>
         <div class="field" id="zone-pull"><input id="o-pull" type="number" step="1" min="0"><span>to</span><input id="o-pullmax" type="number" step="5" min="0"><span>% below the high</span></div>
         <div class="field" id="zone-low"><input id="o-low" type="number" step="1" min="0"><span>% or less above the low</span></div>
-        <small>Picks passing ${CFG.minPasses}+ of the tests you have on (or all of them, if fewer are on) that are in this zone show in the buy zone. Email alerts always use the default settings.</small>
+        <small>Picks passing every test you have on but one, that are in this zone, show in the buy zone. Email alerts always use the default settings.</small>
       </div>
       <button class="reset" id="reset" type="button">Reset to defaults</button>
     </aside>
@@ -194,7 +210,7 @@
       </section>
       <div class="funnel"><h2>Screening funnel</h2><div id="funnel"></div></div>
       <section class="block" id="zone-block">
-        <div class="bhead"><div><h2>Buy zone</h2><p id="zone-desc">Passing ${CFG.minPasses}+ tests and in the buy zone you set on the left. These trigger email alerts.</p></div></div>
+        <div class="bhead"><div><h2>Buy zone</h2><p id="zone-desc">Passing all but at most one test and in the buy zone you set on the left. These trigger email alerts.</p></div></div>
         <div class="picks" id="zone"></div>
       </section>
       <section class="block" id="picks-block">
@@ -232,7 +248,7 @@
 
   // ---------- settings ----------
   function defaults() {
-    const d = { off: {}, zoneOn: true, showSettings: true, low: CFG.lowPct, trendOn: CFG.trend.on, r2: CFG.trend.r2, retOn: CFG.returns.on, retMin: CFG.returns.min, period: CFG.returns.period, zmode: CFG.zone.mode, pull: CFG.zone.pullback, pullMax: CFG.zone.pullbackMax };
+    const d = { off: Object.fromEntries((P.tests || []).filter(t => t.on === false).map(t => [t.k, true])), zoneOn: true, showSettings: true, low: CFG.lowPct, trendOn: CFG.trend.on, r2: CFG.trend.r2, retOn: CFG.returns.on, retMin: CFG.returns.min, period: CFG.returns.period, zmode: CFG.zone.mode, pull: CFG.zone.pullback, pullMax: CFG.zone.pullbackMax };
     for (const t of P.tests) d[t.k] = t.t;
     if (isStock()) Object.assign(d, { uni: P.universe === "bc" ? "all" : P.universe, sector: !!P.sectorPE, fin: !!P.excludeFin, mcap: P.minCapB || 0, ...CFG.dcf });
     return d;
@@ -485,11 +501,15 @@
          Built from ${money(r.fcf0)} average free cash flow, growing ${pct(r.dcfg, 1)} a year for 5 years then fading to ${S.term}%, discounted at ${S.disc}%, plus ${r.netcash >= 0 ? "net cash" : "net debt of"} ${money(Math.abs(r.netcash))}.</p>`;
     const hist = !isStock() || !r.h || !r.h.y.length ? "" : `<div class="hist"><table><thead><tr><th>Year</th>${r.h.y.map(y => `<th class="r">${y}</th>`).join("")}</tr></thead><tbody>
       <tr><td>ROE</td>${r.h.roe.map(v => `<td class="n${v != null && v >= 0.15 ? " ok" : ""}">${pct(v, 0)}</td>`).join("")}</tr>
+      ${r.h.roic ? `<tr><td>ROIC</td>${r.h.roic.map(v => `<td class="n${v != null && v >= 0.12 ? " ok" : ""}">${pct(v, 0)}</td>`).join("")}</tr>` : ""}
       <tr><td>Net margin</td>${r.h.nm.map(v => `<td class="n">${pct(v, 1)}</td>`).join("")}</tr>
+      ${r.h.rev ? `<tr><td>Revenue</td>${r.h.rev.map(v => `<td class="n">${money(v)}</td>`).join("")}</tr>` : ""}
+      ${r.h.sh ? `<tr><td>Shares</td>${r.h.sh.map(v => `<td class="n">${v == null ? "—" : (v / 1e6).toFixed(0) + "M"}</td>`).join("")}</tr>` : ""}
       <tr><td>Free cash flow</td>${r.h.fcf.map(v => `<td class="n${v != null && v < 0 ? " bad" : ""}">${money(v)}</td>`).join("")}</tr>
       </tbody></table></div>`;
     const trendLine = `<p class="dcf"><b>5-year chart:</b> ${r.r2 == null ? "not enough price history." : `steadiness R² ${r.r2.toFixed(2)} (${steady(r) ? "passes" : "below"} your ${S.r2} bar), ${(r.cagr5 * 100).toFixed(1)}% a year over 5 years${r.cagr10 != null ? `, ${(r.cagr10 * 100).toFixed(1)}% over 10` : ""} (${beats(r) ? "beats" : "below"} your ${S.retMin}% bar), worst drop along the way ${(r.maxdd * 100).toFixed(0)}%. Now ${(r.fromHigh * 100).toFixed(1)}% from its 52-week high.`}</p>`;
-    return `<div class="why">${lines}</div>${trendLine}${dcfTxt}${hist}
+    const etfHold = isStock() ? "" : `<h4 class="hold-h">Top 10 holdings on your stock screens</h4><div class="etf-hold" data-etf="${esc(r.t)}"><p class="muted">Scoring holdings…</p></div>`;
+    return `<p class="why-actions"><button type="button" class="reset" data-analyze="${esc(r.t)}">Open full report: outlook, annual meeting, headlines</button></p><div class="why">${lines}</div>${trendLine}${dcfTxt}${hist}${etfHold}
       <div class="extra">${extra}<span>52-wk range $${fx(r.lo52)}–$${fx(r.hi52)}</span>
         <a href="https://finance.yahoo.com/quote/${encodeURIComponent(r.t)}" target="_blank" rel="noopener">Yahoo Finance ↗</a></div>`;
   }
@@ -520,6 +540,7 @@
       || `<tr><td colspan="${ncol}" style="text-align:center;color:var(--muted);padding:24px">Nothing matches these filters.</td></tr>`;
     $("more").hidden = rows.length <= shown;
     $("more").textContent = `Show more (${rows.length - shown} left)`;
+    if (!isStock()) fillHoldings();
   }
 
   function minpOptions() {
@@ -585,7 +606,7 @@
       if ($("o-sector")) $("o-sector").addEventListener("change", e => { S.sector = e.target.checked; save(); renderAll(); });
       $("o-fin").addEventListener("change", e => { S.fin = e.target.checked; save(); renderAll(); });
     }
-    $("reset").addEventListener("click", () => { S = { ...DEF, off: {} }; save(); syncInputs(); renderAll(); });
+    $("reset").addEventListener("click", () => { S = { ...DEF, off: { ...DEF.off } }; save(); syncInputs(); renderAll(); });
     $("run").addEventListener("click", () => load(true));
     ["q", "minp", "sec"].forEach(id => $(id).addEventListener("input", () => { shown = 60; renderTable(); }));
     $("more").addEventListener("click", () => { shown += 60; renderTable(); });
@@ -603,17 +624,17 @@
     $("near-close").addEventListener("click", () => { nearOpen = false; renderSummary(); renderNear(); });
     $("near-filters").addEventListener("click", e => { const c = e.target.closest(".fchip"); if (!c) return; nearFilter = c.dataset.miss || null; renderNear(); });
     $("near-list").addEventListener("click", e => {
-      const p = e.target.closest(".nrow"); if (!p) return;
-      const t = p.dataset.t; open.add(t); $("q").value = t; $("minp").value = "0"; $("sec").value = ""; renderTable();
-      $("table-block").scrollIntoView({ behavior: "smooth", block: "start" });
+      const p = e.target.closest(".nrow"); if (p) analyze(p.dataset.t);
     });
     const toggle = t => { open.has(t) ? open.delete(t) : open.add(t); renderTable(); };
-    $("tb").addEventListener("click", e => { const tr = e.target.closest("tr.main"); if (tr && !e.target.closest("a")) toggle(tr.dataset.t); });
+    $("tb").addEventListener("click", e => {
+      const h = e.target.closest("[data-analyze]"); if (h) { analyze(h.dataset.analyze); return; }
+      const tr = e.target.closest("tr.main"); if (tr && !e.target.closest("a")) toggle(tr.dataset.t);
+    });
     $("tb").addEventListener("keydown", e => { const tr = e.target.closest("tr.main"); if (tr && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggle(tr.dataset.t); } });
+    // cards open the full report; "Show in this page's ranking" inside it jumps to the table
     ["picks", "zone"].forEach(id => $(id).addEventListener("click", e => {
-      const p = e.target.closest(".pick"); if (!p) return;
-      const t = p.dataset.t; open.add(t); $("q").value = t; $("minp").value = "0"; $("sec").value = ""; renderTable();
-      $("tb").scrollIntoView({ behavior: "smooth", block: "start" });
+      const p = e.target.closest(".pick"); if (p) analyze(p.dataset.t);
     }));
   }
 
@@ -636,7 +657,7 @@
   function withPage(pid, data, fn) {
     const saved = [P, S, DATA, PID];
     try {
-      if (pid !== saved[3]) { PID = pid; P = CFG.pages[pid]; S = { ...defaults(), off: {} }; }
+      if (pid !== saved[3]) { PID = pid; P = CFG.pages[pid]; S = defaults(); }
       DATA = data;
       return fn();
     } finally { [P, S, DATA, PID] = saved; }
@@ -687,6 +708,14 @@
       add(r.rg != null && r.rg >= 0.10, S_, `Revenue growing ${pct(r.rg, 0)} year over year`);
       add(r.rg != null && r.rg < 0, W, `Revenue shrinking: ${pct(r.rg, 0)} year over year`);
       add(r.up != null && r.up >= 0.15, S_, `Analysts' average target is ${pct(r.up, 0)} above the price`);
+      add(r.roicmin != null && r.roicmin >= 0.15, S_, `ROIC stayed above 15% every year (lowest ${pct(r.roicmin, 0)})`);
+      add(r.roicmin != null && r.roicmin < 0.06, W, `ROIC fell to ${pct(r.roicmin, 0)} in at least one year`);
+      add(r.icov != null && r.icov >= 15, S_, r.icov >= 999 ? "No meaningful interest costs" : `Covers its interest ${fx(r.icov, 0)}× over`);
+      add(r.icov != null && r.icov < 3, W, r.icov < 0 ? "Operating losses: can't cover interest from profit" : `Thin interest coverage: only ${fx(r.icov, 1)}×`);
+      add(r.shchg != null && r.shchg <= -1, S_, `Buying back shares: count shrinking ${fx(-r.shchg, 1)}% a year`);
+      add(r.shchg != null && r.shchg >= 3, W, `Diluting shareholders: share count growing ${fx(r.shchg, 1)}% a year`);
+      add(r.rgc === 100, S_, "Revenue grew every year on record");
+      add(r.rgc != null && r.rgc < 50, W, `Revenue fell in more years than it grew (${Math.round(100 - r.rgc)}% of years down)`);
     } else {
       add(r.er != null && r.er <= 0.10, S_, `Very low cost: ${r.er.toFixed(2)}% a year`);
       add(r.er != null && r.er > 0.40, W, `Expensive to own: ${r.er.toFixed(2)}% a year`);
@@ -774,13 +803,14 @@
       <div class="an-head">
         <div><div class="eyebrow">${esc(kind === "stock" ? [r.sec, r.ind, r.exch, r.idx, r.r2k ? "Russell 2000 (approx.)" : ""].filter(Boolean).join(" · ") : r.cat || r.grp)}</div>
           <h2 id="an-title">${esc(r.t)} ${priceTag(r)} <span class="muted">${esc(r.n)}</span></h2></div>
-        <button type="button" class="ghost" data-close>Close</button>
+        <div class="an-headbtns">${readBtn("Listen to report")}<button type="button" class="ghost" data-close>Close</button></div>
       </div>
       <div class="an-verdict ${tone}">${esc(verdict)}</div>
       <div class="an-chart">${spark(e, 640, 90)}<div class="an-chart-cap"><span>5-year price · ${esc(trendTxt(e))}</span><span>${esc(zoneTxt)}</span></div>
         <div class="range"><span class="mono">$${fx(r.lo52)}</span><div class="rtrack"><i style="left:${(e.rangePos ?? 0) * 100}%"></i></div><span class="mono">$${fx(r.hi52)}</span></div></div>
       <div class="an-facts">${facts.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div>
-      <div class="an-sw">
+      ${await outlookHTML(r, e, kind)}
+      <div class="an-sw" data-read>
         <div class="an-col good"><h3>Strengths</h3>${good.length ? `<ul>${good.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p class="muted">None stand out.</p>`}</div>
         <div class="an-col weak"><h3>Weaknesses</h3>${bad.length ? `<ul>${bad.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p class="muted">None stand out.</p>`}</div>
       </div>
@@ -788,6 +818,13 @@
       <p class="muted an-note">${pids.includes(PID) ? `${esc(CFG.pages[PID].nav)} uses your current settings on this page; the others use their default settings.` : "Scored with each screen's default settings."}</p>
       <div class="an-pages">${pageCards}</div>
       ${kind === "stock" && e.iv != null && e.iv > 0 ? `<p class="an-note">DCF: ${money(r.fcf0)} average free cash flow growing ${pct(e.dcfg, 1)} a year for 5 years, fading to ${CFG.dcf.term}%, discounted at ${CFG.dcf.disc}%, plus ${r.netcash >= 0 ? "net cash" : "net debt of"} ${money(Math.abs(r.netcash))}.</p>` : ""}
+      ${kind === "etf" ? `<h3 class="an-sub">Top 10 holdings on your stock screens</h3><div class="etf-hold" data-etf="${esc(r.t)}">${await holdingsHTML(r)}</div>` : ""}
+      <form class="an-own" data-own="${esc(r.t)}">
+        <b>${myHoldings().some(h => h.t === r.t) ? "In My stocks · update" : "Own it? Add to My stocks"}</b>
+        <label>Bought at $<input name="buy" type="number" step="0.01" min="0" value="${r.px ? r.px.toFixed(2) : ""}"></label>
+        <label>Judge it on <select name="pid">${pids.map(id => `<option value="${id}"${id === (kind === "etf" ? "etf" : "buffett") ? " selected" : ""}>${esc(CFG.pages[id].nav)}</option>`).join("")}</select></label>
+        <button type="submit" class="reset">${myHoldings().some(h => h.t === r.t) ? "Update" : "Add"}</button>
+      </form>
       <div class="an-actions">
         ${P.data === name ? `<button type="button" class="reset" data-show="${esc(r.t)}">Show in this page's ranking</button>` : ""}
         <a href="https://finance.yahoo.com/quote/${encodeURIComponent(r.t)}" target="_blank" rel="noopener">Open on Yahoo Finance ↗</a>
@@ -807,8 +844,17 @@
 
   function wireLookup() {
     $("lookup").addEventListener("submit", e => { e.preventDefault(); analyze($("lk").value); });
+    $("an").addEventListener("submit", e => {
+      const f = e.target.closest("form.an-own"); if (!f) return;
+      e.preventDefault();
+      upsertHolding({ t: f.dataset.own, buy: parseFloat(f.buy.value) || null, pid: f.pid.value });
+      f.querySelector("b").textContent = "Saved to My stocks";
+      if (P.kind === "mine") renderMine();
+    });
     $("an").addEventListener("click", e => {
-      if (e.target === $("an") || e.target.closest("[data-close]")) { $("an").close(); return; }
+      if (e.target === $("an") || e.target.closest("[data-close]")) { $("an").close(); stopVoice(); return; }
+      const hl = e.target.closest("[data-analyze]");
+      if (hl) { analyze(hl.dataset.analyze); return; }
       const b = e.target.closest("[data-show]");
       if (b) {
         $("an").close();
@@ -818,10 +864,430 @@
     });
   }
 
+
+  // ---------- scoring helpers shared by My stocks, Track record and ETF holdings ----------
+  function scoreOn(pid, d, r) {
+    return withPage(pid, d, () => {
+      const e = evaluate(r);
+      return { e, N: NT(), passes: e.passes, fails: AT().filter(t => !e.ev[t.k].pass).map(testName), excl: exclusion(r) };
+    });
+  }
+  let scanMap = null;
+  async function scanIndex() {
+    if (scanMap) return scanMap;
+    const d = await dataset("scan.json");
+    scanMap = { d, by: new Map(d.rows.map(r => [r.t, r])) };
+    return scanMap;
+  }
+  const firstWord = s => String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, "").split(" ")[0];
+  function resolveHolding(sym, name, by) {
+    const t = String(sym).toUpperCase().replace(/\./g, "-");
+    if (by.has(t)) return by.get(t);
+    const base = String(sym).split(".")[0].toUpperCase();
+    const r = by.get(base);  // foreign listing (ASML.AS) -> US listing, only when the names agree
+    return r && firstWord(r.n) === firstWord(name) ? r : null;
+  }
+
+  // ---------- ETF: rank the fund's top 10 holdings on the stock screens ----------
+
+  // ---------- company outlook, direction signals, annual meeting, headlines (free data) ----------
+  async function companyFile(t) {
+    try { return await getJSON(`co/${encodeURIComponent(t)}.json`); } catch (e) { return {}; }
+  }
+  const dateTxt = d => { if (!d) return ""; const x = typeof d === "number" ? new Date(d * 1000) : new Date(d + (String(d).length === 10 ? "T12:00:00" : "")); return x.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }); };
+  const REC = { strong_buy: "Strong buy", buy: "Buy", hold: "Hold", underperform: "Underperform", sell: "Sell", strong_sell: "Strong sell" };
+
+  function outlookText(r, e, co, kind) {
+    const bits = [];
+    if (kind === "stock") {
+      const who = [r.sec, co.emp ? `${Math.round(co.emp).toLocaleString()} employees` : "", co.ceo ? `CEO ${co.ceo.split(" (")[0].replace(/^(Mr\.|Ms\.|Mrs\.|Dr\.)\s*/, "")}` : ""].filter(Boolean).join(", ");
+      bits.push(`${r.n} (${who}).`);
+      if (r.rec && r.nan) {
+        const up = r.tgt && r.px ? r.tgt / r.px - 1 : null;
+        bits.push(`${Math.round(r.nan)} analyst${r.nan > 1 ? "s" : ""} rate it ${REC[r.rec] || r.rec} on average${r.tgt ? `, with a mean price target of $${fx(r.tgt)} (${up >= 0 ? "+" : ""}${pct(up, 0)} from here; range $${fx(r.tlo)}–$${fx(r.thi)})` : ""}.`);
+      } else bits.push("No analyst coverage on record.");
+      if (r.feps && r.teps && r.teps > 0) {
+        const g = r.feps / r.teps - 1;
+        bits.push(`Earnings per share are expected to ${g >= 0 ? "grow" : "fall"} ${pct(Math.abs(g), 0)} over the next year ($${fx(r.teps)} → $${fx(r.feps)}).`);
+      }
+      if (r.rg != null) bits.push(`Revenue ${r.rg >= 0 ? "grew" : "fell"} ${pct(Math.abs(r.rg), 0)} in the latest year${r.rgc != null ? `, and has risen in ${Math.round(r.rgc)}% of recorded years` : ""}.`);
+      if (e.mos != null) bits.push(e.mos >= 0 ? `It trades ${pct(e.mos, 0)} below the DCF estimate of $${fx(e.iv)} a share.` : `It trades ${pct(-e.mos, 0)} above the DCF estimate of $${fx(e.iv)} a share, so the price assumes faster growth than its record.`);
+      if (r.earn && r.earn * 1000 > Date.now() - 864e5) bits.push(`Next earnings report: ${dateTxt(r.earn)}.`);
+    } else {
+      bits.push(`${r.n} (${[r.cat, r.fam].filter(Boolean).join(", ")}): ${money(r.aum)} in assets at ${r.er != null ? r.er.toFixed(2) + "%" : "an unknown"} a year.`);
+      if (r.r5 != null) bits.push(`It returned ${pct(r.r5, 1)} a year over 5 years${r.r3 != null ? ` and ${pct(r.r3, 1)} over 3` : ""}, with holdings valued at ${fx(r.pe, 1)}× earnings.`);
+    }
+    return bits.join(" ");
+  }
+
+  // Rule-based signals about where the price has been heading and what analysts expect. Not a forecast.
+  function directionSignals(r, e, kind) {
+    const out = [], add = (good, label, txt) => { if (good !== undefined) out.push({ good, label, txt }); };
+    if (r.ma200 && r.px) add(r.px > r.ma200, "Long-term trend", `Price $${fx(r.px)} is ${r.px > r.ma200 ? "above" : "below"} its 200-day average ($${fx(r.ma200)})`);
+    if (r.ma50 && r.ma200) add(r.ma50 > r.ma200, "Medium-term trend", `50-day average is ${r.ma50 > r.ma200 ? "above" : "below"} the 200-day (${r.ma50 > r.ma200 ? "rising" : "weakening"} trend)`);
+    if (r.r2 != null && r.cagr5 != null) add(r.r2 >= 0.6 && r.cagr5 > 0, "5-year chart", `${r.cagr5 > 0 && r.r2 >= 0.6 ? "Steady climb" : r.cagr5 <= 0 ? "Falling" : "Choppy"}: R² ${fx(r.r2)}, ${pct(r.cagr5, 0)} a year`);
+    if (e.fromHigh != null) add(e.fromHigh > -0.2, "Recent move", `${pct(-e.fromHigh, 0)} below its 52-week high`);
+    if (kind === "stock") {
+      if (r.recm) add(r.recm <= 2.3 ? true : r.recm >= 3 ? false : undefined, "Analyst rating", `${REC[r.rec] || "—"} (average score ${fx(r.recm, 1)} on a 1 = strong buy to 5 = sell scale)`);
+      const up = r.tgt && r.px ? r.tgt / r.px - 1 : null;
+      if (up != null) add(up >= 0.1 ? true : up <= -0.05 ? false : undefined, "Price target", `Analysts' mean target is ${up >= 0 ? "+" : ""}${pct(up, 0)} from the price`);
+      if (r.feps && r.teps && r.teps > 0) { const g = r.feps / r.teps - 1; add(g >= 0.08 ? true : g < 0 ? false : undefined, "Earnings outlook", `Next-year EPS expected ${g >= 0 ? "+" : ""}${pct(g, 0)}`); }
+      if (r.rg != null) add(r.rg >= 0.05 ? true : r.rg < 0 ? false : undefined, "Sales momentum", `Revenue ${r.rg >= 0 ? "+" : ""}${pct(r.rg, 0)} in the latest year`);
+    }
+    const up = out.filter(x => x.good).length, down = out.filter(x => !x.good).length;
+    const lean = up - down >= 3 ? "up" : down - up >= 2 ? "down" : "mixed";
+    return { list: out, lean, up, down };
+  }
+
+  async function outlookHTML(r, e, kind) {
+    const co = await companyFile(r.t);
+    const dir = directionSignals(r, e, kind);
+    const leanTxt = { up: "Signals lean up", down: "Signals lean down", mixed: "Mixed signals" }[dir.lean];
+    const sum = co.sum || "";
+    const sec = co.sec || {}, v = sec.vote;
+    const edgar = co.cik ? `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${co.cik}&type=&dateb=&owner=include&count=40` : null;
+    const meeting = kind !== "stock" ? "" : `
+      <section class="an-sec" data-read>
+        <h3 class="an-sub">Annual meeting ${readBtn()}</h3>
+        ${v ? `<p><b>${dateTxt(v.meeting)}</b> · shareholder voting results filed ${dateTxt(v.d)}.</p>
+          ${v.text ? `<blockquote class="an-quote">${esc(v.text.length > 900 ? v.text.slice(0, 900).replace(/\s\S*$/, "") + "…" : v.text)}</blockquote>
+          ${v.text.length > 900 ? `<details><summary>Full voting results</summary><blockquote class="an-quote">${esc(v.text)}</blockquote></details>` : ""}
+          <p class="muted an-note">Quoted from the company's 8-K filing (Item 5.07), not a summary written by MacStocks.</p>` : ""}`
+        : `<p class="muted">${co.cik ? "No annual-meeting results on file yet for this company in the saved data." : "This company doesn't file with the SEC under this ticker (often a foreign company)."}</p>`}
+        <p class="an-links">${[v ? `<a href="${esc(v.u)}" target="_blank" rel="noopener">Voting results ↗</a>` : "", sec.proxy ? `<a href="${esc(sec.proxy.u)}" target="_blank" rel="noopener">Proxy statement (${dateTxt(sec.proxy.d)}) ↗</a>` : "", sec.annual ? `<a href="${esc(sec.annual.u)}" target="_blank" rel="noopener">Annual report ${esc(sec.annual.form)} (${dateTxt(sec.annual.d)}) ↗</a>` : "", edgar ? `<a href="${edgar}" target="_blank" rel="noopener">All SEC filings ↗</a>` : ""].filter(Boolean).join("")}</p>
+      </section>`;
+    const news = (co.news || []).length ? `<ul class="an-news">${co.news.map(n => `<li><a href="${esc(n.u)}" target="_blank" rel="noopener">${esc(n.t)}</a> <span class="muted">${esc(n.p)}${n.d ? " · " + dateTxt(n.d) : ""}</span></li>`).join("")}</ul>`
+      : `<p class="muted">No saved headlines for this one. <a href="https://finance.yahoo.com/quote/${encodeURIComponent(r.t)}/news" target="_blank" rel="noopener">Latest news on Yahoo Finance ↗</a></p>`;
+    return `
+      <section class="an-sec" data-read>
+        <h3 class="an-sub">Company outlook ${readBtn()}</h3>
+        <p>${esc(outlookText(r, e, co, kind))}</p>
+        ${sum ? `<details class="an-about"><summary>What the ${kind === "stock" ? "company" : "fund"} does</summary><p>${esc(sum)}</p>${co.web ? `<p><a href="${esc(co.web)}" target="_blank" rel="noopener">${esc(co.web.replace(/^https?:\/\//, ""))} ↗</a></p>` : ""}</details>` : ""}
+      </section>
+      <section class="an-sec" data-read>
+        <h3 class="an-sub">Which way it's heading ${readBtn()}</h3>
+        <p><span class="pill ${dir.lean === "up" ? "hold" : dir.lean === "down" ? "sell" : "review"}">${leanTxt}</span> <span class="muted">${dir.up} pointing up, ${dir.down} pointing down</span></p>
+        <ul class="an-dir">${dir.list.map(x => `<li class="${x.good ? "ok" : "bad"}"><b>${x.good ? "▲" : "▼"} ${esc(x.label)}</b> ${esc(x.txt)}</li>`).join("")}</ul>
+        <p class="muted an-note">Built from trend, analyst and earnings data. These describe momentum and expectations; nobody can reliably predict where a stock goes next.</p>
+      </section>
+      ${meeting}
+      <section class="an-sec" data-read>
+        <h3 class="an-sub">Recent headlines ${readBtn()}</h3>
+        ${news}
+      </section>`;
+  }
+
+  // ---------- voice reader (built into the browser, free) ----------
+  const VKEY = "macstocks-voice-rate";
+  const readBtn = (label = "Listen") => `<button type="button" class="listen" data-listen aria-label="${label}" title="${label}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg><span>${label}</span></button>`;
+  function speakableText(el) {
+    const c = el.cloneNode(true);
+    c.querySelectorAll("svg, button, input, select, textarea, [data-noread], .listen, .spark, .rtrack, .bar, .dots").forEach(x => x.remove());
+    c.querySelectorAll("details").forEach(d => { if (!d.open) d.querySelectorAll(":scope > :not(summary)").forEach(x => x.remove()); });
+    let t = c.innerText || c.textContent || "";
+    return t.replace(/R²/g, "R squared").replace(/×/g, " times").replace(/·/g, ", ").replace(/↗/g, "").replace(/▲|▼|✓|✕/g, "")
+      .replace(/\s+–\s+|–/g, " to ").replace(/−/g, "minus ").replace(/%\/yr/g, " percent a year").replace(/\/yr/g, " a year")
+      .replace(/(\d)pt\b/g, "$1 points").replace(/\bpts\b/g, "points").replace(/\bD\/E\b/g, "debt to equity").replace(/\bP\/E\b/g, "P E")
+      .replace(/\bFCF\b/g, "free cash flow").replace(/\bROIC\b/g, "R O I C").replace(/\bROE\b/g, "R O E").replace(/\bDCF\b/g, "D C F")
+      .replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, ".\n").replace(/\n/g, ". ").replace(/\.\s*\./g, ".").trim();
+  }
+  let voiceQueue = [], voiceOn = false;
+  function pickVoice() {
+    const vs = speechSynthesis.getVoices().filter(v => /^en(-|_)?US/i.test(v.lang) || /^en/i.test(v.lang));
+    return vs.find(v => /Samantha|Ava|Allison|Google US English|Jenny|Aria/i.test(v.name)) || vs[0] || null;
+  }
+  function stopVoice() { voiceOn = false; voiceQueue = []; try { speechSynthesis.cancel(); } catch (e) {} updateVoiceUI(); }
+  function speak(text) {
+    if (!("speechSynthesis" in window)) { alertVoice("This browser can't read text aloud."); return; }
+    stopVoice();
+    const chunks = text.match(/[^.!?]+[.!?]*\s*/g) || [text];
+    voiceQueue = []; let buf = "";
+    for (const c of chunks) { if ((buf + c).length > 220) { if (buf) voiceQueue.push(buf); buf = c; } else buf += c; }
+    if (buf.trim()) voiceQueue.push(buf);
+    voiceOn = true; updateVoiceUI();
+    const rate = (() => { try { return parseFloat(localStorage.getItem(VKEY)) || 1; } catch (e) { return 1; } })();
+    const next = () => {
+      if (!voiceOn || !voiceQueue.length) { voiceOn = false; updateVoiceUI(); return; }
+      const u = new SpeechSynthesisUtterance(voiceQueue.shift());
+      const v = pickVoice(); if (v) u.voice = v;
+      u.rate = rate; u.onend = next; u.onerror = next;
+      speechSynthesis.speak(u);
+    };
+    next();
+  }
+  function alertVoice(msg) { const b = $("voice-bar"); if (b) { b.hidden = false; $("voice-status").textContent = msg; } }
+  function updateVoiceUI() {
+    const b = $("voice-bar"); if (!b) return;
+    b.hidden = !voiceOn;
+    $("voice-status").textContent = voiceOn ? "Reading aloud…" : "";
+    $("voice-pause").textContent = speechSynthesis.paused ? "Resume" : "Pause";
+  }
+  function readPage() {
+    const sel = String(window.getSelection ? window.getSelection() : "").trim();
+    if (sel) return speak(sel);
+    if ($("an").open) return speak(speakableText($("an-body")));
+    const parts = [...document.querySelectorAll("#app header, #app .summary, #app #near-block:not([hidden]), #app #zone-block, #app #picks-block, #app .special, #app .notes")];
+    speak(parts.map(speakableText).filter(Boolean).join(". "));
+  }
+  function wireVoice() {
+    document.body.insertAdjacentHTML("beforeend", `
+      <div class="voice-bar" id="voice-bar" hidden role="status">
+        <span id="voice-status"></span>
+        <button type="button" id="voice-pause">Pause</button>
+        <label>Speed <select id="voice-rate"><option value="0.8">0.8×</option><option value="1">1×</option><option value="1.2">1.2×</option><option value="1.5">1.5×</option></select></label>
+        <button type="button" id="voice-stop">Stop</button>
+      </div>
+      <button type="button" class="sel-read" id="sel-read" hidden>${readBtn("Read this")}</button>`);
+    try { $("voice-rate").value = localStorage.getItem(VKEY) || "1"; } catch (e) {}
+    $("voice-rate").addEventListener("change", e => { try { localStorage.setItem(VKEY, e.target.value); } catch (err) {} });
+    $("voice-stop").addEventListener("click", stopVoice);
+    $("voice-pause").addEventListener("click", () => { speechSynthesis.paused ? speechSynthesis.resume() : speechSynthesis.pause(); updateVoiceUI(); });
+    document.addEventListener("click", e => {
+      const b = e.target.closest("[data-listen]");
+      if (!b || b.closest("#sel-read")) return;
+      e.preventDefault(); e.stopPropagation();
+      if (b.id === "listen-page") return voiceOn ? stopVoice() : readPage();
+      const sec = b.closest("[data-read], section, .stat, .pick, .an-inner, header");
+      speak(speakableText(sec || document.body));
+    }, true);
+    // select any text, then tap "Read this"
+    const sr = $("sel-read");
+    document.addEventListener("selectionchange", () => {
+      const s = window.getSelection(), txt = String(s || "").trim();
+      if (!txt || txt.length < 3 || !s.rangeCount) { sr.hidden = true; return; }
+      const rect = s.getRangeAt(0).getBoundingClientRect();
+      sr.hidden = false;
+      sr.style.top = `${Math.max(8, rect.top + window.scrollY - 40)}px`;
+      sr.style.left = `${Math.min(window.innerWidth - 120, Math.max(8, rect.left + window.scrollX))}px`;
+    });
+    sr.addEventListener("mousedown", e => e.preventDefault());
+    sr.addEventListener("click", () => { const t = String(window.getSelection()).trim(); sr.hidden = true; if (t) speak(t); });
+    window.addEventListener("pagehide", stopVoice);
+  }
+
+  async function holdingsHTML(etf) {
+    if (!etf.top || !etf.top.length) return `<p class="muted">Yahoo doesn't list holdings for this fund yet (they arrive with the next weekday scan).</p>`;
+    const { d, by } = await scanIndex();
+    const rows = etf.top.map(([sym, name, w]) => {
+      const r = resolveHolding(sym, name, by);
+      if (!r) return { sym, name, w, r: null };
+      const v = scoreOn("value", d, r), b = scoreOn("buffett", d, r);
+      return { sym, name, w, r, v, b, key: b.passes / b.N + v.passes / v.N, score: (b.e.score + v.e.score) / 2 };
+    });
+    const scored = rows.filter(x => x.r).sort((a, b) => b.key - a.key || b.score - a.score);
+    const missing = rows.filter(x => !x.r);
+    const covered = scored.reduce((a, x) => a + x.w, 0), total = rows.reduce((a, x) => a + x.w, 0);
+    const strongW = scored.filter(x => x.b.passes >= x.b.N - 1 || x.v.passes >= x.v.N - 1).reduce((a, x) => a + x.w, 0);
+    const cell = (s, N) => `<span class="an-score ${s === N ? "ok" : s === N - 1 ? "warn" : ""}">${s}/${N}</span>`;
+    return `
+      <p class="hold-sum">${pct(strongW, 1)} of the fund sits in top-10 holdings that pass all but at most one test on your Value or Buffett screen.
+        ${missing.length ? `${missing.length} holding${missing.length > 1 ? "s are" : " is"} listed outside the US and not in the scan.` : ""}</p>
+      <div class="hold-wrap"><table class="hold">
+        <thead><tr><th>#</th><th>Holding</th><th class="r">Weight</th><th class="r">Value</th><th class="r">Buffett</th><th class="r">Score</th><th>5-yr chart</th></tr></thead>
+        <tbody>${scored.map((x, i) => `<tr data-analyze="${esc(x.r.t)}" title="Analyze ${esc(x.r.t)}">
+          <td class="n">${i + 1}</td>
+          <td><span class="tk">${esc(x.r.t)}</span> ${priceTag(x.r)} <span class="nm">${esc(x.r.n)}</span></td>
+          <td class="n">${pct(x.w, 1)}</td><td class="n">${cell(x.v.passes, x.v.N)}</td><td class="n">${cell(x.b.passes, x.b.N)}</td>
+          <td class="n">${Math.round(x.score)}</td><td>${spark(x.b.e, 84, 22)}</td></tr>`).join("")}
+        ${missing.map(x => `<tr class="na"><td class="n">–</td><td><span class="tk">${esc(x.sym)}</span> <span class="nm">${esc(x.name)}</span></td><td class="n">${pct(x.w, 1)}</td><td colspan="4" class="muted">Not in the US scan</td></tr>`).join("")}
+        </tbody></table></div>
+      <p class="muted an-note">Ranked by how many tests each holding passes on the Value and Buffett screens (default settings), then score. Top 10 = ${pct(total, 0)} of the fund.</p>`;
+  }
+  async function fillHoldings() {
+    for (const el of document.querySelectorAll(".etf-hold:not(.done)")) {
+      el.classList.add("done");
+      const r = DATA.rows.find(x => x.t === el.dataset.etf);
+      try { el.innerHTML = await holdingsHTML(r); } catch (e) { el.innerHTML = `<p class="muted">Couldn't load holdings (${esc(e.message)}).</p>`; }
+    }
+  }
+
+  // ---------- My stocks: holdings kept in this browser, with sell signals ----------
+  const HKEY = "macstocks-holdings";
+  function myHoldings() { try { return JSON.parse(localStorage.getItem(HKEY) || "[]"); } catch (e) { return []; } }
+  function saveHoldings(list) { try { localStorage.setItem(HKEY, JSON.stringify(list)); } catch (e) {} }
+  function upsertHolding(h) {
+    const list = myHoldings(), i = list.findIndex(x => x.t === h.t);
+    if (i >= 0) list[i] = { ...list[i], ...h };
+    else list.push({ ...h, d: new Date().toISOString().slice(0, 10) });
+    saveHoldings(list);
+  }
+
+  function sellCheck(h, d) {
+    const r = d.rows.find(x => x.t === h.t);
+    if (!r) return { h, r: null };
+    const sc = scoreOn(h.pid, d, r), e = sc.e, rule = CFG.sell, sig = [];
+    const failing = sc.N - sc.passes >= rule.failTests;
+    const today = new Date().toISOString().slice(0, 10);
+    if (failing && !h.failSince) h.failSince = today;
+    if (!failing) h.failSince = null;
+    const days = h.failSince ? Math.round((Date.now() - new Date(h.failSince)) / 864e5) : 0;
+    if (failing) sig.push({ key: "fail", txt: `Fails ${sc.N - sc.passes} of ${sc.N} tests: ${sc.fails.join(", ")}${days ? ` (since ${h.failSince})` : ""}` });
+    if (e.mos != null && e.mos <= -rule.overDcf / 100) sig.push({ key: "dcf", txt: `Price is ${pct(-e.mos, 0)} above its DCF value ($${fx(e.iv)})` });
+    if (e.fromHigh != null && e.fromHigh <= -rule.drawdown / 100) sig.push({ key: "trend", txt: `${pct(-e.fromHigh, 0)} below its 52-week high: the uptrend may be broken` });
+    const gain = h.buy && r.px ? r.px / h.buy - 1 : null;
+    if (gain != null && gain <= -rule.stop / 100) sig.push({ key: "stop", txt: `Down ${pct(-gain, 0)} from your buy price` });
+    if (r.r2 != null && r.r2 < rule.choppy) sig.push({ key: "chop", txt: `Chart has turned choppy (steadiness R² ${fx(r.r2)})` });
+    const persisted = failing && days >= rule.persistDays;
+    const status = sig.length >= 2 || persisted ? "sell" : sig.length === 1 ? "review" : "hold";
+    return { h, r, sc, e, sig, gain, status };
+  }
+
+  async function renderMine() {
+    const data = { "scan.json": await dataset("scan.json"), "etfs.json": await dataset("etfs.json") };
+    const list = myHoldings();  // read after loading, so stocks added meanwhile aren't missed
+    const checks = list.map(h => sellCheck({ ...h }, data[CFG.pages[h.pid]?.data || "scan.json"]));
+    // record when each started failing, merging into whatever is stored now
+    const stored = myHoldings();
+    for (const c of checks) { const x = stored.find(h => h.t === c.h.t); if (x) x.failSince = c.h.failSince; }
+    saveHoldings(stored);
+    const n = s => checks.filter(c => c.status === s).length;
+    const gains = checks.filter(c => c.gain != null).map(c => c.gain);
+    $("mine-summary").innerHTML = `
+      <div class="stat"><div class="eyebrow">Holdings</div><div class="v">${list.length}</div><div class="s">saved in this browser</div></div>
+      <div class="stat${n("sell") ? " bad" : ""}"><div class="eyebrow">Sell signals</div><div class="v">${n("sell")}</div><div class="s">2+ warnings, or failing for ${CFG.sell.persistDays}+ days</div></div>
+      <div class="stat${n("review") ? " warnc" : ""}"><div class="eyebrow">Review</div><div class="v">${n("review")}</div><div class="s">one warning</div></div>
+      <div class="stat${n("hold") ? " hot" : ""}"><div class="eyebrow">Hold</div><div class="v">${n("hold")}</div><div class="s">${gains.length ? `average gain ${pct(gains.reduce((a, b) => a + b, 0) / gains.length, 1)}` : "no warnings"}</div></div>`;
+    const label = { sell: "Sell signal", review: "Review", hold: "Hold" };
+    $("mine-list").innerHTML = !checks.length
+      ? `<div class="empty">No stocks yet. Add one above, or open any stock with Analyze and choose "Add to My stocks".</div>`
+      : checks.sort((a, b) => ["sell", "review", "hold"].indexOf(a.status) - ["sell", "review", "hold"].indexOf(b.status)).map(c => !c.r
+        ? `<div class="mrow"><div class="mname"><span class="tk">${esc(c.h.t)}</span> <span class="muted">no longer in the scan</span></div><button type="button" class="reset" data-del="${esc(c.h.t)}">Remove</button></div>`
+        : `<div class="mrow ${c.status}">
+          <div class="mname" data-analyze="${esc(c.r.t)}"><span class="tk">${esc(c.r.t)}</span> ${priceTag(c.r)}<div class="nm">${esc(c.r.n)}</div></div>
+          <div class="mspark">${spark(c.e, 110, 30)}</div>
+          <div class="mfacts"><span>Judged on <b>${esc(CFG.pages[c.h.pid].nav)}</b>: ${c.sc.passes}/${c.sc.N} tests</span>
+            <span>${c.h.buy ? `Bought at $${fx(c.h.buy)} · <b class="${c.gain >= 0 ? "ok" : "bad"}">${c.gain >= 0 ? "+" : ""}${pct(c.gain, 1)}</b>` : "No buy price"} · since ${esc(c.h.d || "")}</span></div>
+          <div class="msig">${c.sig.length ? `<ul>${c.sig.map(x => `<li>${esc(x.txt)}</li>`).join("")}</ul>` : `<span class="muted">No warnings</span>`}</div>
+          <div class="mstat"><span class="pill ${c.status}">${label[c.status]}</span><button type="button" class="linkbtn" data-del="${esc(c.r.t)}">Remove</button></div>
+        </div>`).join("");
+  }
+
+  function mineShell() {
+    const sr = CFG.sell;
+    return `
+      <header><div><div class="eyebrow">Your holdings · sell signals</div><h1>My Stocks</h1>
+        <p>Stocks you own, re-checked against the screen you picked every time you open this page. Saved in this browser only: your list stays on this device until you remove it.</p></div></header>
+      <form class="mine-add" id="mine-add" autocomplete="off">
+        <input id="mine-t" list="lk-list" placeholder="Ticker" aria-label="Ticker" required>
+        <input id="mine-buy" type="number" step="0.01" min="0" placeholder="Bought at $ (optional)" aria-label="Buy price">
+        <select id="mine-pid" aria-label="Screen to judge it on">${Object.entries(CFG.pages).filter(([, p]) => p.kind === "stock" || p.kind === "etf").map(([id, p]) => `<option value="${id}"${id === "buffett" ? " selected" : ""}>Judge on ${esc(p.nav)}</option>`).join("")}</select>
+        <button type="submit" class="run">Add stock</button>
+      </form>
+      <p class="err" id="mine-err" hidden></p>
+      <div class="summary" id="mine-summary"></div>
+      <div class="mlist" id="mine-list"><p class="muted">Loading…</p></div>
+      <section class="notes">
+        <div><h3>When a warning appears</h3><p>Fails ${sr.failTests}+ of its screen's tests · price ${sr.overDcf}%+ above its DCF value · ${sr.drawdown}%+ below its 52-week high · down ${sr.stop}%+ from your buy price · chart steadiness under ${sr.choppy}.</p></div>
+        <div><h3>Review vs sell signal</h3><p>One warning means look again. Two or more at once, or failing the tests for ${sr.persistDays}+ days in a row, is a sell signal. That's roughly "two bad quarters", tracked from the first day this page saw it fail.</p></div>
+        <div><h3>Moving devices</h3><p><button type="button" class="reset" id="mine-copy">Copy my list</button> then paste it on the other device: <button type="button" class="reset" id="mine-paste">Paste a list</button></p><textarea id="mine-io" rows="3" hidden placeholder="Paste your list here, then press Paste a list again"></textarea></div>
+      </section>`;
+  }
+  function wireMine() {
+    $("mine-add").addEventListener("submit", async e => {
+      e.preventDefault();
+      const t = $("mine-t").value.trim().toUpperCase().replace(/\./g, "-"), pid = $("mine-pid").value;
+      const d = await dataset(CFG.pages[pid].data);
+      if (!d.rows.some(r => r.t === t)) { $("mine-err").hidden = false; $("mine-err").textContent = `${t} isn't on the ${CFG.pages[pid].nav} data. Stocks go on a stock screen, funds on ETFs.`; return; }
+      $("mine-err").hidden = true;
+      const r = d.rows.find(x => x.t === t);
+      upsertHolding({ t, pid, buy: parseFloat($("mine-buy").value) || r.px || null });
+      $("mine-t").value = ""; $("mine-buy").value = "";
+      renderMine();
+    });
+    $("mine-list").addEventListener("click", e => {
+      const del = e.target.closest("[data-del]");
+      if (del) { saveHoldings(myHoldings().filter(h => h.t !== del.dataset.del)); renderMine(); return; }
+      const a = e.target.closest("[data-analyze]");
+      if (a) analyze(a.dataset.analyze);
+    });
+    $("mine-copy").addEventListener("click", () => {
+      const txt = JSON.stringify(myHoldings());
+      const io = $("mine-io"); io.hidden = false; io.value = txt; io.select();
+      navigator.clipboard?.writeText(txt).catch(() => {});
+    });
+    $("mine-paste").addEventListener("click", () => {
+      const io = $("mine-io");
+      if (io.hidden || !io.value.trim()) { io.hidden = false; io.value = ""; io.focus(); return; }
+      try {
+        const list = JSON.parse(io.value);
+        if (!Array.isArray(list)) throw new Error("not a list");
+        list.forEach(h => h && h.t && h.pid && upsertHolding(h));
+        io.value = ""; io.hidden = true; renderMine();
+      } catch (err) { $("mine-err").hidden = false; $("mine-err").textContent = "That doesn't look like a copied list. Copy it again on the other device."; }
+    });
+  }
+
+  // ---------- Track record: weekly picks vs SPY since they were picked ----------
+  async function renderTrack() {
+    let T, L = {};
+    try { T = await getJSON("track.json", true); } catch (e) {
+      $("track-body").innerHTML = `<div class="empty">The first weekly snapshot hasn't been recorded yet. It's taken during the next morning scan.</div>`; return;
+    }
+    try { L = (await getJSON("live.json", true)).q || {}; } catch (e) {}
+    const now = t => (L[t] && L[t][0]) || T.last[t];
+    const spyNow = now("SPY");
+    const snaps = T.snaps.map(s => {
+      const rets = s.picks.map(([t, p]) => ({ t, p, now: now(t), ret: now(t) ? now(t) / p - 1 : null })).filter(x => x.ret != null);
+      const avg = rets.length ? rets.reduce((a, x) => a + x.ret, 0) / rets.length : null;
+      const spy = spyNow && s.spy ? spyNow / s.spy - 1 : null;
+      return { ...s, rets, avg, spy, ex: avg != null && spy != null ? avg - spy : null };
+    });
+    const first = snaps.length ? snaps[0].d : null;
+    const days = first ? Math.round((Date.now() - new Date(first)) / 864e5) : 0;
+    const pages = Object.entries(CFG.pages).filter(([, p]) => p.kind === "stock" || p.kind === "etf");
+    const sum = pages.map(([pid, p]) => {
+      const ss = snaps.filter(s => s.page === pid && s.ex != null);
+      const avg = k => ss.length ? ss.reduce((a, s) => a + s[k], 0) / ss.length : null;
+      return { pid, p, n: ss.length, avg: avg("avg"), spy: avg("spy"), ex: avg("ex"), beat: ss.filter(s => s.ex > 0).length };
+    });
+    const sign = v => v == null ? "—" : (v >= 0 ? "+" : "") + pct(v, 1);
+    $("track-body").innerHTML = `
+      <p class="track-note">${first ? `Tracking since <b>${esc(first)}</b> (${days} day${days === 1 ? "" : "s"}).` : ""} ${days < 180 ? "Results this early are mostly noise; judge the screens after 6–12 months of weekly snapshots." : ""}</p>
+      <div class="tsum">${sum.map(x => `
+        <div class="stat${x.ex > 0 ? " hot" : x.ex < 0 ? " bad" : ""}">
+          <div class="eyebrow">${esc(x.p.nav)}</div>
+          <div class="v">${sign(x.ex)}</div>
+          <div class="s">${x.n ? `vs SPY on average · picks ${sign(x.avg)}, SPY ${sign(x.spy)} · beat SPY in ${x.beat} of ${x.n} snapshots` : "no snapshots yet"}</div>
+        </div>`).join("")}</div>
+      ${pages.map(([pid, p]) => {
+        const ss = snaps.filter(s => s.page === pid).slice().reverse();
+        if (!ss.length) return "";
+        return `<section class="block"><h2>${esc(p.nav)}</h2><div class="tablebox"><table class="ttab">
+          <thead><tr><th>Picked on</th><th class="r">Picks</th><th class="r">Picks since</th><th class="r">SPY since</th><th class="r">Difference</th><th>Picks</th></tr></thead>
+          <tbody>${ss.map(s => `<tr>
+            <td>${esc(s.d)}</td><td class="n">${s.picks.length}</td><td class="n">${sign(s.avg)}</td><td class="n">${sign(s.spy)}</td>
+            <td class="n ${s.ex > 0 ? "ok" : s.ex < 0 ? "bad" : ""}">${sign(s.ex)}</td>
+            <td class="tpicks">${s.rets.length ? s.rets.sort((a, b) => b.ret - a.ret).map(x => `<span data-analyze="${esc(x.t)}" class="${x.ret >= 0 ? "ok" : "bad"}">${esc(x.t)} ${sign(x.ret)}</span>`).join("") : `<span class="muted">No stock passed every test that week</span>`}</td></tr>`).join("")}
+          </tbody></table></div></section>`;
+      }).join("")}
+      <section class="notes">
+        <div><h3>How it's measured</h3><p>Every week each screen's full matches (default settings, every test passed) are recorded with that day's price. "Picks since" is their equal-weight average price change from then to now; "SPY since" is the S&amp;P 500 ETF over the same span.</p></div>
+        <div><h3>Why forward, not a backtest</h3><p>Free data only shows companies as they look today, so testing the screen on past years would quietly use information nobody had then. Recording picks as they happen can't cheat that way.</p></div>
+        <div><h3>What's left out</h3><p>Prices only: dividends, trading costs and taxes aren't counted, for the picks or SPY. Stocks that drop out of the scan keep their last recorded price.</p></div>
+      </section>`;
+  }
+  function trackShell() {
+    return `<header><div><div class="eyebrow">Forward test · screen picks vs the S&amp;P 500</div><h1>Track Record</h1>
+      <p>Does screening actually beat just owning the market? Each week the robot records what every screen picks, then this page tracks those picks against SPY.</p></div></header>
+      <div id="track-body"><p class="muted">Loading…</p></div>`;
+  }
+
+  async function specialBoot() {
+    document.title = `${P.title} · MacStocks`;
+    $("app").innerHTML = topbar() + `<div class="special">${P.kind === "mine" ? mineShell() : trackShell()}</div>`;
+    wireLookup(); wireVoice();
+    if (P.kind === "mine") { wireMine(); renderMine(); } else renderTrack();
+    $("app").addEventListener("click", e => {
+      const a = e.target.closest(".tpicks [data-analyze]"); if (a) analyze(a.dataset.analyze);
+    });
+    fillLookupList();
+  }
+
   async function boot() {
     try { CFG = await getJSON("config.json", true); }
     catch (e) { document.getElementById("app").innerHTML = `<div class="err">Could not load the site configuration (${esc(e.message)}).</div>`; return; }
     P = CFG.pages[PID];
+    if (P.kind === "mine" || P.kind === "track") return specialBoot();
     DEF = defaults();
     S = { ...DEF };
     try {
@@ -829,7 +1295,7 @@
       if (typeof saved.showSettings === "boolean") S.showSettings = saved.showSettings;
       save();  // drops any screening settings stored by older versions
     } catch (e) {}
-    shell(); syncInputs(); wire(); wireLookup();
+    shell(); syncInputs(); wire(); wireLookup(); wireVoice();
     await load(false);
     fillLookupList();
   }

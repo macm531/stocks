@@ -32,7 +32,8 @@ from ranges import price_ranges, trend_stats
 ROOT = Path(__file__).parent
 OUT = ROOT / "docs" / "scan.json"
 HISTORY = ROOT / "history"
-CKPT = ROOT / "scan_partial.json"  # progress saved during a run, so a crash never loses fetched data
+CKPT = ROOT / "scan_partial.json"
+CO = ROOT / "docs" / "co"  # per-company detail files (description, headlines, SEC filings)  # progress saved during a run, so a crash never loses fetched data
 
 UA = {"User-Agent": "Mozilla/5.0 (stock-scanner personal use)"}
 
@@ -245,6 +246,21 @@ def _fetch(sym, index):
         "chg52": num(i.get("52WeekChange")),
         "sh": num(i.get("sharesOutstanding") or i.get("impliedSharesOutstanding")),
         "icov": icov,
+        # outlook: analyst view, expected earnings, moving averages (all from the profile already fetched)
+        "rec": i.get("recommendationKey") if i.get("recommendationKey") not in (None, "none") else None,
+        "recm": num(i.get("recommendationMean")),
+        "nan": num(i.get("numberOfAnalystOpinions")),
+        "tlo": num(i.get("targetLowPrice")), "thi": num(i.get("targetHighPrice")),
+        "feps": num(i.get("forwardEps")), "teps": num(i.get("trailingEps")),
+        "earn": num(i.get("earningsTimestamp")),
+        "ma50": num(i.get("fiftyDayAverage")), "ma200": num(i.get("twoHundredDayAverage")),
+        "_co": {  # longer text goes to docs/co/<ticker>.json, loaded only when a report opens
+            "sum": i.get("longBusinessSummary") or "",
+            "ceo": next((f"{o.get('name')} ({o.get('title')})" for o in (i.get("companyOfficers") or [])
+                         if "CEO" in (o.get("title") or "") or "Chief Executive" in (o.get("title") or "")), None),
+            "emp": num(i.get("fullTimeEmployees")),
+            "web": i.get("website"),
+        },
         "h": h,
         **derived(h, debt, cash, ni_latest),
     }
@@ -278,6 +294,22 @@ def sector_medians(rows):
     out = {s: round(statistics.median(v), 2) for s, v in by.items() if len(v) >= 3}
     out["_market"] = round(statistics.median(allpe), 2) if allpe else None
     return out
+
+
+def write_co(rows):
+    """Merge each fresh row's long text into docs/co/<ticker>.json, keeping headlines/filings added by details.py."""
+    CO.mkdir(parents=True, exist_ok=True)
+    for r in rows:
+        co = r.pop("_co", None)
+        if not co:
+            continue
+        f = CO / f"{r['t']}.json"
+        try:
+            cur = json.loads(f.read_text()) if f.exists() else {}
+        except Exception:
+            cur = {}
+        cur.update(co)
+        f.write_text(json.dumps(cur, separators=(",", ":")))
 
 
 def approx_russell2000(rows):
@@ -369,6 +401,7 @@ def main():
         r["idx"], r["exch"] = info["idx"], info["exch"]
         rows.append(r)
     rows.sort(key=lambda r: r["t"])
+    write_co(fresh.values())
     CKPT.write_text(json.dumps(fresh, separators=(",", ":")))
     try:
         add_ranges(rows)

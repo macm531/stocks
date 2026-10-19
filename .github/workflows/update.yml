@@ -45,6 +45,7 @@ jobs:
         run: |
           if git fetch --depth 1 origin data 2>/dev/null; then
             for f in $DATA_FILES; do git show FETCH_HEAD:"$f" > "$f" 2>/dev/null || rm -f "$f"; done
+            git checkout FETCH_HEAD -- docs/co 2>/dev/null && git reset -q docs/co || true  # per-company files
           fi
           ls -la docs
 
@@ -77,6 +78,7 @@ jobs:
           else python scan.py --budget 75; fi
           python alert.py --force --prices-only
           python track.py
+          python details.py || echo "details step failed; keeping previous company files"
 
       - name: Refresh prices and send alerts
         if: steps.mode.outputs.mode == 'prices'
@@ -89,6 +91,7 @@ jobs:
         run: |
           tmp=$(mktemp -d)
           for f in $DATA_FILES; do [ -e "$f" ] && mkdir -p "$tmp/$(dirname "$f")" && cp "$f" "$tmp/$f"; done
+          [ -d docs/co ] && mkdir -p "$tmp/docs" && cp -r docs/co "$tmp/docs/co"
           cd "$tmp"
           git init -q -b data
           git config user.name "stock-bot"
