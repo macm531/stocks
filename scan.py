@@ -180,6 +180,9 @@ def _fetch(sym, index):
     i = t.info or {}
     price = num(i.get("currentPrice") or i.get("regularMarketPrice"))
     mcap = num(i.get("marketCap"))
+    if price is None and mcap is None:
+        # Yahoo answers throttled requests with a near-empty profile and no error; treat it as a failure
+        raise RuntimeError("empty profile (likely rate-limited)")
     pe = num(i.get("trailingPE"))
     growth = num(i.get("earningsGrowth"))
 
@@ -395,7 +398,12 @@ def main():
     # Merge: fresh rows win, cached rows fill in, delisted tickers drop out.
     rows = []
     for t, info in uni.items():
-        r = fresh.get(t) or old.get(t)
+        r = fresh.get(t)
+        prev_r = old.get(t)
+        # never let a thin refresh replace a good saved row
+        if r and not r.get("mc") and prev_r and prev_r.get("mc") and not prev_r.get("_skip"):
+            r = prev_r
+        r = r or prev_r
         if not r or r.get("_skip"):
             continue
         r["idx"], r["exch"] = info["idx"], info["exch"]
@@ -434,6 +442,11 @@ def main():
         "rows": rows,
         "prev": prev,
     }
+    # safety net: a run that would shrink the list sharply is almost always a data-source outage
+    before = len(old_data["rows"]) if old_data else 0
+    if before > 1000 and len(rows) < 0.8 * before:
+        raise SystemExit(f"refusing to save: {len(rows)} rows vs {before} before (likely Yahoo throttling); "
+                         f"keeping the previous file")
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(data, separators=(",", ":")))
     CKPT.unlink(missing_ok=True)

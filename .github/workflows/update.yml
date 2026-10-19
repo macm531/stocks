@@ -74,8 +74,8 @@ jobs:
         run: |
           # ETFs first, before Yahoo throttles; fullscan refreshes every stock regardless of age
           python etf.py
-          if [ "${{ steps.mode.outputs.mode }}" = "fullscan" ]; then python scan.py --stale-hours 0 --budget 95
-          else python scan.py --budget 75; fi
+          if [ "${{ steps.mode.outputs.mode }}" = "fullscan" ]; then python scan.py --stale-hours 0 --budget 95 || echo "scan not saved; keeping previous data"
+          else python scan.py --budget 75 || echo "scan not saved; keeping previous data"; fi
           python alert.py --force --prices-only
           python track.py
           python details.py || echo "details step failed; keeping previous company files"
