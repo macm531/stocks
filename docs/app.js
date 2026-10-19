@@ -905,7 +905,7 @@ ${topbar()}
       if (r.rec && r.nan) {
         const up = r.tgt && r.px ? r.tgt / r.px - 1 : null;
         bits.push(`${Math.round(r.nan)} analyst${r.nan > 1 ? "s" : ""} rate it ${REC[r.rec] || r.rec} on average${r.tgt ? `, with a mean price target of $${fx(r.tgt)} (${up >= 0 ? "+" : ""}${pct(up, 0)} from here; range $${fx(r.tlo)}–$${fx(r.thi)})` : ""}.`);
-      } else bits.push("No analyst coverage on record.");
+      } else bits.push("rec" in r ? "No analyst coverage on record." : "Analyst ratings for this company arrive with its next scheduled scan (within two days).");
       if (r.feps && r.teps && r.teps > 0) {
         const g = r.feps / r.teps - 1;
         bits.push(`Earnings per share are expected to ${g >= 0 ? "grow" : "fall"} ${pct(Math.abs(g), 0)} over the next year ($${fx(r.teps)} → $${fx(r.feps)}).`);
