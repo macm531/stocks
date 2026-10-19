@@ -382,6 +382,13 @@ ${topbar()}
 
   // ---------- render ----------
   const cls = e => e.na ? "na" : e.pass ? "ok" : "bad";
+  // sector badge (category for ETFs), with the industry as a second line where known
+  const secTag = (r, withInd = true) => {
+    const sec = r.sec || r.cat || r.grp;
+    if (!sec || sec === "Unknown") return "";
+    const ind = withInd && r.ind ? `<span class="secind">${esc(r.ind)}</span>` : "";
+    return `<span class="sectag" title="${esc(r.ind || sec)}">${esc(sec)}</span>${ind}`;
+  };
   const priceTag = r => r.px == null ? "" : `<span class="px">$${r.px >= 1000 ? r.px.toFixed(0) : r.px.toFixed(2)}</span>`;
   const chipMuted = txt => `<span class="chip" style="background:var(--track);color:var(--muted)">${txt}</span>`;
 
@@ -417,7 +424,7 @@ ${topbar()}
     const list = rows.filter(x => !nearFilter || x.miss.k === nearFilter);
     $("near-list").innerHTML = !list.length ? `<div class="empty">No near misses with these settings.</div>` : list.map(({ r, miss }) => `
       <button type="button" class="nrow" data-t="${esc(r.t)}">
-        <span class="nname"><span class="tk">${esc(r.t)}</span> ${priceTag(r)} <span class="nm">${esc(r.n)}</span></span>
+        <span class="nname"><span class="tk">${esc(r.t)}</span> ${priceTag(r)} <span class="nm">${esc(r.n)}</span><span class="secrow">${secTag(r, false)}</span></span>
         <span class="nspark">${spark(r, 84, 24)}</span>
         <span class="nmiss"><span class="chip miss">Missed: ${esc(testName(miss))}</span>
           <span class="ntxt">${esc(META[miss.k].bad && META[miss.k].bad(r) ? META[miss.k].bad(r) : r.ev[miss.k].na ? "No data for this test" : missDetail(r, miss))}</span></span>
@@ -454,7 +461,7 @@ ${topbar()}
     if (r.warn.length) h += `<span class="chip warn">Check data: ${r.warn.join(", ")}</span>`;
     return h;
   }
-  const sub = r => isStock() ? `${esc(r.n)} · ${esc(r.sec)}` : `${esc(r.n)}`;
+  const sub = r => esc(r.n);
   const extraChip = r => isStock()
     ? chipMuted(`${money(r.mc)}${r.up != null ? " · target " + (r.up >= 0 ? "+" : "") + (r.up * 100).toFixed(0) + "%" : ""}`)
     : chipMuted(`${esc(r.cat || r.grp)} · 3-yr ${pct(r.r3, 1)}`);
@@ -469,7 +476,7 @@ ${topbar()}
     const note = top.length ? "" : `<div class="empty" style="grid-column:1/-1">Nothing passes all ${N} tests right now. Showing the best near misses (${N - 1} of ${N}).</div>`;
     $("picks").innerHTML = note + pool.map(r => `
       <button class="pick" type="button" data-t="${esc(r.t)}">
-        <div class="pick-top"><div><div class="tick">${esc(r.t)} ${priceTag(r)}</div><div class="pname">${sub(r)}</div></div>
+        <div class="pick-top"><div><div class="tick">${esc(r.t)} ${priceTag(r)}</div><div class="pname">${sub(r)}</div><div class="secrow">${secTag(r)}</div></div>
           <div class="score">${r.score}<small>score</small></div></div>
         ${mgrid(r)}
         <div class="sparkrow">${spark(r, 220, 40)}<span>${trendTxt(r)}</span></div>
@@ -484,7 +491,7 @@ ${topbar()}
     if (!z.length) { $("zone").innerHTML = `<div class="empty">Nothing passing ${zmin()}+ tests is ${pb ? `${S.pull}–${S.pullMax}% below its 52-week high` : `within ${S.low}% of its 52-week low`} right now.</div>`; return; }
     $("zone").innerHTML = z.map(r => `
       <button class="pick" type="button" data-t="${esc(r.t)}">
-        <div class="pick-top"><div><div class="tick">${esc(r.t)} ${priceTag(r)}</div><div class="pname">${sub(r)} · ${r.passes}/${NT()} tests</div></div>
+        <div class="pick-top"><div><div class="tick">${esc(r.t)} ${priceTag(r)}</div><div class="pname">${sub(r)} · ${r.passes}/${NT()} tests</div><div class="secrow">${secTag(r)}</div></div>
           <div class="score">${pb ? (r.fromHigh * 100).toFixed(1) + "%<small>from high</small>" : "+" + (r.fromLow * 100).toFixed(1) + "%<small>above low</small>"}</div></div>
         <div class="sparkrow">${spark(r, 220, 40)}<span>${trendTxt(r)}</span></div>
         <div class="range"><span class="mono">$${fx(r.lo52)}</span><div class="rtrack"><i style="left:${(r.rangePos ?? 0) * 100}%"></i></div><span class="mono">$${fx(r.hi52)}</span></div>
@@ -1111,7 +1118,7 @@ ${topbar()}
         <thead><tr><th>#</th><th>Holding</th><th class="r">Weight</th><th class="r">Value</th><th class="r">Buffett</th><th class="r">Score</th><th>5-yr chart</th></tr></thead>
         <tbody>${scored.map((x, i) => `<tr data-analyze="${esc(x.r.t)}" title="Analyze ${esc(x.r.t)}">
           <td class="n">${i + 1}</td>
-          <td><span class="tk">${esc(x.r.t)}</span> ${priceTag(x.r)} <span class="nm">${esc(x.r.n)}</span></td>
+          <td><span class="tk">${esc(x.r.t)}</span> ${priceTag(x.r)} <span class="nm">${esc(x.r.n)}</span> ${secTag(x.r, false)}</td>
           <td class="n">${pct(x.w, 1)}</td><td class="n">${cell(x.v.passes, x.v.N)}</td><td class="n">${cell(x.b.passes, x.b.N)}</td>
           <td class="n">${Math.round(x.score)}</td><td>${spark(x.b.e, 84, 22)}</td></tr>`).join("")}
         ${missing.map(x => `<tr class="na"><td class="n">–</td><td><span class="tk">${esc(x.sym)}</span> <span class="nm">${esc(x.name)}</span></td><td class="n">${pct(x.w, 1)}</td><td colspan="4" class="muted">Not in the US scan</td></tr>`).join("")}
@@ -1178,7 +1185,7 @@ ${topbar()}
       : checks.sort((a, b) => ["sell", "review", "hold"].indexOf(a.status) - ["sell", "review", "hold"].indexOf(b.status)).map(c => !c.r
         ? `<div class="mrow"><div class="mname"><span class="tk">${esc(c.h.t)}</span> <span class="muted">no longer in the scan</span></div><button type="button" class="reset" data-del="${esc(c.h.t)}">Remove</button></div>`
         : `<div class="mrow ${c.status}">
-          <div class="mname" data-analyze="${esc(c.r.t)}"><span class="tk">${esc(c.r.t)}</span> ${priceTag(c.r)}<div class="nm">${esc(c.r.n)}</div></div>
+          <div class="mname" data-analyze="${esc(c.r.t)}"><span class="tk">${esc(c.r.t)}</span> ${priceTag(c.r)}<div class="nm">${esc(c.r.n)}</div><div class="secrow">${secTag(c.r, false)}</div></div>
           <div class="mspark">${spark(c.e, 110, 30)}</div>
           <div class="mfacts"><span>Judged on <b>${esc(CFG.pages[c.h.pid].nav)}</b>: ${c.sc.passes}/${c.sc.N} tests</span>
             <span>${c.h.buy ? `Bought at $${fx(c.h.buy)} · <b class="${c.gain >= 0 ? "ok" : "bad"}">${c.gain >= 0 ? "+" : ""}${pct(c.gain, 1)}</b>` : "No buy price"} · since ${esc(c.h.d || "")}</span></div>

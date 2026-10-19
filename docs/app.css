@@ -33,6 +33,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }  /* our display rules must never un-hide an element */
 body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.5; }
 .wrap { max-width: 1320px; margin: 0 auto; padding-block: 28px 64px;
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
@@ -402,3 +403,9 @@ table.ttab { min-width: 760px; }
 .otab a.tk:hover { color: var(--accent); }
 .onrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 4px; }
 @media (max-width: 720px) { .onrow { grid-template-columns: minmax(0, 1fr); } }
+
+/* sector badge */
+.secrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin-top: 6px; }
+.sectag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); border-radius: 5px; padding: 2px 7px; white-space: nowrap; }
+.secind { font-size: 12px; color: var(--muted); }
+.nname .secrow { margin-top: 3px; }
