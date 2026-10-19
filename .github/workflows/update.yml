@@ -10,7 +10,6 @@ on:
     - cron: "17 10 * * 1-5"              # fundamentals: morning pass (~6am ET)
     - cron: "17 22 * * 0-4"              # fundamentals: evening pass, keeps the rotation moving
     - cron: "7,22,37,52 13-21 * * 1-5"   # prices + buy-zone alerts during market hours
-    - cron: "41 18 * * 1-5"              # option chains for the income page (~2:40pm ET, market open)
   workflow_dispatch:
     inputs:
       mode:
@@ -56,7 +55,6 @@ jobs:
           s="${{ github.event.schedule }}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then m="${{ inputs.mode }}"
           elif [ "$s" = "17 10 * * 1-5" ] || [ "$s" = "17 22 * * 0-4" ]; then m=scan
-          elif [ "$s" = "41 18 * * 1-5" ]; then m=options
           elif [ "${{ github.event_name }}" = "schedule" ]; then m=prices
           else m=deploy; fi
           echo "mode=$m" >> "$GITHUB_OUTPUT"; echo "mode: $m"
@@ -91,6 +89,12 @@ jobs:
         run: |
           python alert.py ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
           python track.py --prices
+          # once a day, after 18:00 UTC (2pm EDT / 1pm EST) while the market is open, rescan option chains.
+          # Rides on the price runs because queued runs here replace each other; a standalone cron could be dropped.
+          if [ "$(date -u +%H)" -ge 18 ] && [ "$(date -u +%H)" -lt 20 ] && \
+             [ "$(python -c "import json;print(json.load(open('docs/options.json'))['at'][:10])" 2>/dev/null)" != "$(date -u +%F)" ]; then
+            python options.py || echo "option scan not saved; keeping previous data"
+          fi
 
       - name: Save data branch
         if: steps.mode.outputs.mode != 'deploy'
