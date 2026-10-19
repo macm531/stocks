@@ -14,3 +14,5 @@ universe.json
 alerts_state.json
 scan_partial.json
 docs/co/
+docs/options.json
+docs/ivhist.json

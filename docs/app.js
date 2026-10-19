@@ -1272,6 +1272,206 @@ ${topbar()}
       <div id="track-body"><p class="muted">Loading…</p></div>`;
   }
 
+  // ---------- option income page ----------
+  const OKEY = "opt-settings-v1";
+  let OD = null, OS = null, OSORT = { k: "ann", dir: -1 }, OSHOW = 40;
+  const OF = [  // filters in funnel order; each tests one contract `c` on stock `s`
+    { k: "ivr", name: "IV Rank", test: (s, c) => s.ivr != null && s.ivr >= OS.ivrMin, miss: s => `IV Rank ${s.ivr == null ? "n/a" : Math.round(s.ivr)}` },
+    { k: "dte", name: "30–45 days out", test: (s, c) => c.dte >= OS.dteMin && c.dte <= OS.dteMax, miss: (s, c) => `${c.dte} DTE` },
+    { k: "delta", name: "Delta", test: (s, c) => Math.abs(c.d) >= OS.deltaMin && Math.abs(c.d) <= OS.deltaMax, miss: (s, c) => `delta ${Math.abs(c.d).toFixed(2)}` },
+    { k: "vol", name: "Volume", test: (s, c) => c.vol >= OS.volMin, miss: (s, c) => `volume ${c.vol.toLocaleString()}` },
+    { k: "oi", name: "Open interest", test: (s, c) => c.oi >= OS.oiMin, miss: (s, c) => `OI ${c.oi.toLocaleString()}` },
+    { k: "spr", name: "Bid-ask spread", test: (s, c) => c.spr <= OS.spreadMax, miss: (s, c) => `spread ${c.spr}%` },
+    { k: "de", name: "Debt-to-equity", test: (s, c) => s.de != null && s.de < OS.deMax, miss: s => `D/E ${fx(s.de)}` },
+    { k: "earn", name: "No earnings first", test: (s, c) => OS.earnings !== "avoid" || !earnBefore(s, c), miss: s => `earnings ${shortDate(s.ed)}` },
+  ];
+  const earnBefore = (s, c) => s.ed && s.ed >= new Date().toISOString().slice(0, 10) && s.ed <= c.x;
+  const shortDate = d => d ? new Date(d + "T12:00").toLocaleDateString([], { month: "short", day: "numeric" }) : "—";
+  const usd = v => v == null ? "—" : "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  function optShell() {
+    const D = CFG.options.defaults;
+    const num = (id, label, sfx, step, hint) => `
+      <div class="crit"><div class="crit-top"><label for="${id}">${label}</label><span class="cnt" id="c-${id}"></span></div>
+        <div class="field"><input id="${id}" type="number" step="${step}" min="0"><span>${sfx}</span></div>${hint ? `<small>${hint}</small>` : ""}</div>`;
+    const pair = (a, b, label, sfx, step, hint) => `
+      <div class="crit"><div class="crit-top"><label for="${a}">${label}</label><span class="cnt" id="c-${a}"></span></div>
+        <div class="field"><input id="${a}" type="number" step="${step}" min="0" aria-label="${label} minimum"><span>to</span><input id="${b}" type="number" step="${step}" min="0" aria-label="${label} maximum"><span>${sfx}</span></div>${hint ? `<small>${hint}</small>` : ""}</div>`;
+    return `
+      <header><div><div class="eyebrow">Cash-secured puts &amp; covered calls · quality stocks only</div><h1>Option Income Finder</h1>
+        <p>Finds options worth selling for monthly income: rich premiums (high IV Rank), liquid contracts with tight spreads, 30–45 days out at 0.20–0.30 delta, on low-debt companies that have made money every year, so being assigned leaves you owning a business you'd want anyway.</p></div>
+        <div class="runbox"><div class="stamp" id="stamp">Loading…</div></div></header>
+      <div class="desk" id="desk">
+        <aside class="rail" aria-label="Filters">
+          <div class="crit"><label for="o-type">Strategy</label>
+            <select class="zsel" id="o-type"><option value="P">Cash-secured puts</option><option value="C">Covered calls</option><option value="B">Both</option></select></div>
+          <hr>
+          ${num("o-ivr", "IV Rank at least", "", 5, "Where today's implied volatility sits in its 1-year range. Above 50 means premiums are rich; above 70 is ideal.")}
+          ${pair("o-dte1", "o-dte2", "Days to expiration", "days", 1, "Where time decay speeds up, before gamma risk near expiry.")}
+          ${pair("o-d1", "o-d2", "Delta", "", 0.01, "0.20–0.30 delta ≈ 70–80% chance of expiring worthless.")}
+          <hr>
+          ${num("o-vol", "Volume at least", "contracts", 50, "Contracts traded today.")}
+          ${num("o-oi", "Open interest at least", "contracts", 100)}
+          ${num("o-spr", "Bid-ask spread under", "% of mid", 1, "Keeps you from losing the edge to slippage.")}
+          <hr>
+          ${num("o-de", "Debt-to-equity below", "×", 0.1, `Every stock scanned already has a profit in every reported year and positive trailing earnings, and is worth over $${CFG.options.minCapB}B.`)}
+          <div class="crit"><label for="o-earn">Earnings before expiry</label>
+            <select class="zsel" id="o-earn"><option value="avoid">Skip these trades</option><option value="flag">Show, with a warning</option></select>
+            <small>High IV right before earnings is the market pricing a big move, not free premium.</small></div>
+          <button type="button" class="reset" id="o-reset">Reset to the rules</button>
+        </aside>
+        <main>
+          <div class="summary" id="o-summary"></div>
+          <div class="funnel" id="o-funnel"></div>
+          <section class="block"><div class="bhead"><div><h2>Best trade on each stock</h2><p id="o-picks-sub"></p></div></div><div class="picks" id="o-picks"></div></section>
+          <section class="near" id="o-near" hidden></section>
+          <section class="block"><div class="bhead"><div><h2>Every matching contract</h2><p>Click a column to sort. Click a ticker for its company report.</p></div>
+            <div class="tools"><input type="search" id="o-q" placeholder="Filter ticker" aria-label="Filter by ticker"></div></div>
+            <div class="tablebox" id="o-table"></div><div class="more" id="o-more"></div></section>
+          <section class="notes">
+            <div><h3>IV Rank</h3><p>Yahoo doesn't publish past implied volatility, so the scanner records each stock's 30-day at-the-money IV every trading day. Until a stock has ${CFG.options.ivr.minDays} days of readings, its rank is an estimate (marked “est.”) comparing today's IV with the past year's range of 30-day realized volatility. IV usually runs above realized volatility, so estimates lean high.</p></div>
+            <div><h3>The numbers</h3><p>Implied volatility, delta and probability of profit are worked out from each contract's bid-ask midpoint with Black-Scholes. Return is the midpoint premium over the cash tied up (strike minus premium for a put, share price for a covered call), and annualized assumes you could repeat it all year. Probability of profit is the market-implied chance the trade makes money at expiry, not a forecast.</p></div>
+            <div><h3>What can go wrong</h3><p>A put can be assigned at the strike after a crash, leaving you with a paper loss on shares below your breakeven; a covered call caps your upside if the stock rallies. Quotes are delayed and update once a day after the scan, so check the live price with your broker before placing an order. Not financial advice.</p></div>
+          </section>
+        </main>
+      </div>`;
+  }
+
+  function optLoadSettings() {
+    OS = { ...CFG.options.defaults };
+    try { Object.assign(OS, JSON.parse(localStorage.getItem(OKEY) || "{}")); } catch (e) {}
+  }
+  function optSave() { try { localStorage.setItem(OKEY, JSON.stringify(OS)); } catch (e) {} }
+  const OIN = { "o-ivr": "ivrMin", "o-dte1": "dteMin", "o-dte2": "dteMax", "o-d1": "deltaMin", "o-d2": "deltaMax", "o-vol": "volMin", "o-oi": "oiMin", "o-spr": "spreadMax", "o-de": "deMax" };
+  function optSync() {
+    for (const [id, k] of Object.entries(OIN)) $(id).value = OS[k];
+    $("o-type").value = OS.type; $("o-earn").value = OS.earnings;
+  }
+
+  // Every contract on the board, with which filters it fails.
+  function optEval() {
+    const out = [];
+    for (const s of OD.stocks) for (const c of s.c) {
+      if (OS.type !== "B" && c.ty !== OS.type) continue;
+      const fails = OF.filter(f => !f.test(s, c)).map(f => f.k);
+      out.push({ s, c, fails, earn: earnBefore(s, c) });
+    }
+    return out;
+  }
+
+  function optRender() {
+    const all = optEval();
+    const pass = all.filter(x => !x.fails.length);
+    const stocksHot = OD.stocks.filter(s => s.ivr != null && s.ivr >= OS.ivrMin).length;
+    const best = {};
+    for (const x of pass) if (!best[x.s.t] || x.c.ann > best[x.s.t].c.ann) best[x.s.t] = x;
+    const picks = Object.values(best).sort((a, b) => b.c.ann - a.c.ann);
+    const med = a => { if (!a.length) return null; const v = a.slice().sort((p, q) => p - q); return v[Math.floor(v.length / 2)]; };
+
+    $("o-summary").innerHTML = `
+      <div class="stat"><div class="eyebrow">Quality stocks</div><div class="v">${OD.stocks.length}</div><div class="s">with listed options, D/E under ${CFG.options.deMax}, profitable every year</div></div>
+      <div class="stat"><div class="eyebrow">Rich premiums</div><div class="v">${stocksHot}</div><div class="s">with IV Rank ${OS.ivrMin}+</div></div>
+      <div class="stat${pass.length ? " hot" : ""}"><div class="eyebrow">Trades that pass</div><div class="v">${pass.length}</div><div class="s">contracts on ${picks.length} stock${picks.length === 1 ? "" : "s"}</div></div>
+      <div class="stat"><div class="eyebrow">Typical income</div><div class="v">${pass.length ? pct(med(pass.map(x => x.c.ret)), 2) : "—"}</div><div class="s">${pass.length ? `per trade (${pct(med(pass.map(x => x.c.ann)), 0)} a year), ${pct(med(pass.map(x => x.c.pop)), 0)} chance of profit` : "median premium per trade"}</div></div>`;
+
+    // funnel: contracts surviving each filter in turn
+    let left = all;
+    const rows = [["Contracts scanned", all.length]];
+    for (const f of OF) { left = left.filter(x => !x.fails.includes(f.k)); rows.push([f.name, left.length]); }
+    const top = Math.max(1, all.length);
+    $("o-funnel").innerHTML = `<h2>How the ${OS.type === "P" ? "puts" : OS.type === "C" ? "calls" : "contracts"} narrow down</h2>` + rows.map(([n, v]) =>
+      `<div class="frow"><span>${esc(n)}</span><div class="ftrack"><div class="fbar" style="width:${(v / top * 100).toFixed(1)}%"></div></div><span class="num">${v.toLocaleString()}</span></div>`).join("");
+    for (const [id, k] of Object.entries({ "o-ivr": "ivr", "o-dte1": "dte", "o-d1": "delta", "o-vol": "vol", "o-oi": "oi", "o-spr": "spr", "o-de": "de" }))
+      $("c-" + id).textContent = all.filter(x => !x.fails.includes(k)).length.toLocaleString() + " pass";
+
+    $("o-picks-sub").textContent = picks.length ? "Highest annualized income per stock among contracts that pass every filter." : "";
+    $("o-picks").innerHTML = picks.length ? picks.slice(0, 12).map(x => optCard(x)).join("") :
+      `<div class="empty">No contract passes every filter right now. The closest ones are below; loosen whichever filter they miss, or check back after the next scan.</div>`;
+
+    // near misses: contracts failing exactly one filter (best per stock)
+    const nearBy = {};
+    for (const x of all) if (x.fails.length === 1 && (!nearBy[x.s.t] || x.c.ann > nearBy[x.s.t].c.ann)) nearBy[x.s.t] = x;
+    const near = Object.values(nearBy).sort((a, b) => b.c.ann - a.c.ann).slice(0, 10);
+    $("o-near").hidden = !near.length;
+    $("o-near").innerHTML = `<div class="bhead"><div><h2>Almost</h2><p>Miss one filter. Best contract per stock.</p></div></div><div class="nlist">${near.map(x => {
+      const f = OF.find(f => f.k === x.fails[0]);
+      return `<button type="button" class="nrow onrow" data-analyze="${esc(x.s.t)}"><span class="nname"><span class="tk">${esc(x.s.t)}</span> <span class="ntxt">${optLabel(x.c)}</span></span>
+        <span class="nmiss"><span class="chip miss">${esc(f.miss(x.s, x.c))}</span><span class="ntxt">${pct(x.c.ann, 0)}/yr · POP ${pct(x.c.pop, 0)}</span></span></button>`;
+    }).join("")}</div>`;
+
+    optTable(pass);
+  }
+
+  const optLabel = c => `${shortDate(c.x)} ${c.k % 1 ? c.k.toFixed(2) : c.k} ${c.ty === "P" ? "put" : "call"}`;
+  function optCard({ s, c, earn }) {
+    const cash = c.ty === "P" ? c.k * 100 : s.px * 100;
+    return `<button type="button" class="pick" data-analyze="${esc(s.t)}">
+      <div class="pick-top"><div><div class="tick">${esc(s.t)}</div><div class="pname">${esc(s.n)}</div></div>
+        <div class="score">${pct(c.ann, 0)}<small>a year</small></div></div>
+      <div class="opt-trade">Sell the <b>${optLabel(c)}</b> for <b>${usd(c.mid)}</b></div>
+      <div class="mgrid">
+        <div class="m ok"><b>Collect</b><span>$${Math.round(c.mid * 100).toLocaleString()}</span></div>
+        <div class="m ok"><b>POP</b><span>${pct(c.pop, 0)}</span></div>
+        <div class="m ok"><b>Delta</b><span>${Math.abs(c.d).toFixed(2)}</span></div>
+        <div class="m ok"><b>IVR</b><span>${Math.round(s.ivr)}${s.est ? "*" : ""}</span></div>
+        <div class="m ok"><b>DTE</b><span>${c.dte}</span></div>
+      </div>
+      <div class="opt-facts">Stock ${usd(s.px)} · strike ${pct(c.otm, 1)} ${c.ty === "P" ? "below" : "above"} · breakeven ${usd(c.be)}<br>
+        ${c.ty === "P" ? `Secures ${usd(cash)} cash` : `Needs 100 shares (${usd(cash)})`} · ${pct(c.ret, 2)} in ${c.dte} days</div>
+      <div class="chips"><span class="chip">vol ${c.vol.toLocaleString()}</span><span class="chip">OI ${c.oi.toLocaleString()}</span><span class="chip">spread ${c.spr}%</span>${earn ? `<span class="chip warn">earnings ${shortDate(s.ed)}</span>` : ""}${s.est ? `<span class="chip warn" title="IV Rank estimated from realized volatility until enough IV history is recorded">IVR est.</span>` : ""}</div>
+    </button>`;
+  }
+
+  const OCOLS = [
+    ["t", "Ticker", x => x.s.t], ["ty", "Type", x => x.c.ty], ["k", "Strike", x => x.c.k], ["x", "Expires", x => x.c.x], ["dte", "DTE", x => x.c.dte],
+    ["d", "Delta", x => Math.abs(x.c.d)], ["pop", "POP", x => x.c.pop], ["mid", "Premium", x => x.c.mid], ["spr", "Spread", x => x.c.spr],
+    ["vol", "Volume", x => x.c.vol], ["oi", "Open int.", x => x.c.oi], ["iv", "IV", x => x.c.iv], ["ivr", "IVR", x => x.s.ivr],
+    ["otm", "OTM", x => x.c.otm], ["be", "Breakeven", x => x.c.be], ["ret", "Return", x => x.c.ret], ["ann", "Annual", x => x.c.ann], ["ed", "Earnings", x => x.s.ed || "9999"],
+  ];
+  function optTable(pass) {
+    const q = $("o-q").value.trim().toUpperCase();
+    const col = OCOLS.find(c => c[0] === OSORT.k);
+    const rows = pass.filter(x => !q || x.s.t.startsWith(q)).sort((a, b) => { const p = col[2](a), r = col[2](b); return (p > r ? 1 : p < r ? -1 : 0) * OSORT.dir; });
+    if (!rows.length) { $("o-table").innerHTML = `<div class="empty">No contracts match.</div>`; $("o-more").innerHTML = ""; return; }
+    $("o-table").innerHTML = `<table class="otab"><thead><tr>${OCOLS.map(([k, n]) => `<th data-k="${k}" class="${k === "t" || k === "ty" || k === "x" || k === "ed" ? "" : "r"}${k === OSORT.k ? " sorted" : ""}">${n}${k === OSORT.k ? (OSORT.dir < 0 ? " ↓" : " ↑") : ""}</th>`).join("")}</tr></thead>
+      <tbody>${rows.slice(0, OSHOW).map(({ s, c, earn }) => `<tr>
+        <td><a href="#" class="tk" data-analyze="${esc(s.t)}">${esc(s.t)}</a></td><td>${c.ty === "P" ? "Put" : "Call"}</td><td class="n">${c.k}</td><td>${shortDate(c.x)}</td><td class="n">${c.dte}</td>
+        <td class="n">${Math.abs(c.d).toFixed(2)}</td><td class="n">${pct(c.pop, 0)}</td><td class="n">${usd(c.mid)}</td><td class="n">${c.spr}%</td>
+        <td class="n">${c.vol.toLocaleString()}</td><td class="n">${c.oi.toLocaleString()}</td><td class="n">${pct(c.iv, 0)}</td><td class="n">${Math.round(s.ivr)}${s.est ? "*" : ""}</td>
+        <td class="n">${pct(c.otm, 1)}</td><td class="n">${usd(c.be)}</td><td class="n">${pct(c.ret, 2)}</td><td class="n ok">${pct(c.ann, 0)}</td>
+        <td class="${earn ? "bad" : "na"}">${s.ed ? shortDate(s.ed) : "—"}</td></tr>`).join("")}</tbody></table>`;
+    $("o-more").innerHTML = rows.length > OSHOW ? `<button type="button" class="ghost" id="o-showmore">Show ${Math.min(40, rows.length - OSHOW)} more of ${rows.length - OSHOW}</button>` : "";
+  }
+
+  function optWire() {
+    for (const [id, k] of Object.entries(OIN)) $(id).addEventListener("input", e => { const v = parseFloat(e.target.value); if (isNaN(v)) return; OS[k] = v; optSave(); optRender(); });
+    $("o-type").addEventListener("change", e => { OS.type = e.target.value; optSave(); optRender(); });
+    $("o-earn").addEventListener("change", e => { OS.earnings = e.target.value; optSave(); optRender(); });
+    $("o-reset").addEventListener("click", () => { OS = { ...CFG.options.defaults }; optSave(); optSync(); optRender(); });
+    $("o-q").addEventListener("input", () => { OSHOW = 40; optRender(); });
+    $("app").addEventListener("click", e => {
+      const th = e.target.closest(".otab th[data-k]");
+      if (th) { const k = th.dataset.k; OSORT = { k, dir: OSORT.k === k ? -OSORT.dir : (k === "t" || k === "x" || k === "ed" || k === "spr" || k === "dte" ? 1 : -1) }; optRender(); return; }
+      if (e.target.id === "o-showmore") { OSHOW += 40; optRender(); return; }
+      const a = e.target.closest("[data-analyze]"); if (a) { e.preventDefault(); analyze(a.dataset.analyze); }
+    });
+  }
+
+  async function optBoot() {
+    $("app").innerHTML = topbar() + optShell();
+    wireLookup(); wireVoice(); optLoadSettings(); optSync(); optWire();
+    try {
+      OD = await getJSON("options.json", true);
+      const at = new Date(OD.at), ageH = (Date.now() - at) / 36e5;
+      $("stamp").innerHTML = `Option chains <b>${at.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</b> (${ageH < 1 ? "under an hour ago" : ageH < 48 ? Math.round(ageH) + " hours ago" : Math.round(ageH / 24) + " days ago"})<br>${OD.stocks.length} stocks · ${OD.stocks.reduce((a, s) => a + s.c.length, 0).toLocaleString()} contracts`;
+      optRender();
+    } catch (e) {
+      $("stamp").textContent = "Could not load option data.";
+      document.querySelector("main").insertAdjacentHTML("afterbegin", `<div class="err">The option scan hasn't loaded (${esc(e.message)}). It runs each weekday afternoon while the market is open.</div>`);
+    }
+    fillLookupList();
+  }
+
   async function specialBoot() {
     document.title = `${P.title} · MacStocks`;
     $("app").innerHTML = topbar() + `<div class="special">${P.kind === "mine" ? mineShell() : trackShell()}</div>`;
@@ -1288,6 +1488,7 @@ ${topbar()}
     catch (e) { document.getElementById("app").innerHTML = `<div class="err">Could not load the site configuration (${esc(e.message)}).</div>`; return; }
     P = CFG.pages[PID];
     if (P.kind === "mine" || P.kind === "track") return specialBoot();
+    if (P.kind === "options") { document.title = `${P.title} · MacStocks`; return optBoot(); }
     DEF = defaults();
     S = { ...DEF };
     try {

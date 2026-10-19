@@ -393,3 +393,12 @@ table.ttab { min-width: 760px; }
 .sel-read { position: absolute; z-index: 60; background: none; border: 0; padding: 0; }
 .listen { white-space: nowrap; flex: none; }
 @media (max-width: 560px) { .an-headbtns .listen span { display: none; } .an-headbtns .listen { padding: 8px; } }
+
+/* Option income page */
+.opt-trade { font-size: 14px; }
+.opt-trade b { font-family: var(--f-data); font-weight: 500; font-size: 13px; }
+.opt-facts { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.otab a.tk { color: var(--ink); text-decoration: none; }
+.otab a.tk:hover { color: var(--accent); }
+.onrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 4px; }
+@media (max-width: 720px) { .onrow { grid-template-columns: minmax(0, 1fr); } }

@@ -216,6 +216,12 @@
         }
       ]
     },
+    "options": {
+      "file": "options.html",
+      "nav": "Option income",
+      "title": "Option Income Finder",
+      "kind": "options"
+    },
     "mine": {
       "file": "mine.html",
       "nav": "My stocks",
@@ -263,5 +269,34 @@
     "stop": 25,
     "choppy": 0.5,
     "persistDays": 90
+  },
+  "options": {
+    "deMax": 0.5,
+    "minCapB": 2,
+    "ivr": {
+      "minDays": 120
+    },
+    "envelope": {
+      "dteMin": 21,
+      "dteMax": 60,
+      "deltaMin": 0.12,
+      "deltaMax": 0.38,
+      "volMin": 25,
+      "oiMin": 100,
+      "spreadMax": 25
+    },
+    "defaults": {
+      "ivrMin": 50,
+      "volMin": 500,
+      "oiMin": 1000,
+      "spreadMax": 10,
+      "dteMin": 30,
+      "dteMax": 45,
+      "deltaMin": 0.2,
+      "deltaMax": 0.3,
+      "deMax": 0.5,
+      "type": "P",
+      "earnings": "avoid"
+    }
   }
 }

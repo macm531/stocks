@@ -10,12 +10,13 @@ on:
     - cron: "17 10 * * 1-5"              # fundamentals: morning pass (~6am ET)
     - cron: "17 22 * * 0-4"              # fundamentals: evening pass, keeps the rotation moving
     - cron: "7,22,37,52 13-21 * * 1-5"   # prices + buy-zone alerts during market hours
+    - cron: "41 18 * * 1-5"              # option chains for the income page (~2:40pm ET, market open)
   workflow_dispatch:
     inputs:
       mode:
         description: "What to run"
         type: choice
-        options: [prices, scan, fullscan, deploy]
+        options: [prices, scan, fullscan, options, deploy]
         default: prices
 
 permissions:
@@ -37,7 +38,7 @@ jobs:
     env:
       SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-      DATA_FILES: docs/scan.json docs/etfs.json docs/live.json docs/track.json universe.json alerts_state.json alerts.log
+      DATA_FILES: docs/scan.json docs/etfs.json docs/live.json docs/track.json docs/options.json docs/ivhist.json universe.json alerts_state.json alerts.log
     steps:
       - uses: actions/checkout@v4
 
@@ -55,6 +56,7 @@ jobs:
           s="${{ github.event.schedule }}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then m="${{ inputs.mode }}"
           elif [ "$s" = "17 10 * * 1-5" ] || [ "$s" = "17 22 * * 0-4" ]; then m=scan
+          elif [ "$s" = "41 18 * * 1-5" ]; then m=options
           elif [ "${{ github.event_name }}" = "schedule" ]; then m=prices
           else m=deploy; fi
           echo "mode=$m" >> "$GITHUB_OUTPUT"; echo "mode: $m"
@@ -79,6 +81,10 @@ jobs:
           python alert.py --force --prices-only
           python track.py
           python details.py || echo "details step failed; keeping previous company files"
+
+      - name: Scan option chains for the income page
+        if: steps.mode.outputs.mode == 'options'
+        run: python options.py || echo "option scan not saved; keeping previous data"
 
       - name: Refresh prices and send alerts
         if: steps.mode.outputs.mode == 'prices'
