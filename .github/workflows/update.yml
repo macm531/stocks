@@ -110,6 +110,10 @@ jobs:
           git commit -qm "Data $(date -u +%Y-%m-%dT%H:%MZ)"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data
 
+      - name: Stamp asset versions
+        # each deploy gets fresh URLs for the script and styles, so browsers don't keep an old copy
+        run: sed -i -E "s#(app\.(js|css))\"#\1?v=${GITHUB_SHA::7}\"#g" docs/*.html && grep -h "app.js" docs/index.html
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
