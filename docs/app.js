@@ -102,7 +102,7 @@
 
   // ---------- layout ----------
   function shell() {
-    document.title = P.title;
+    document.title = `${P.title} · MacStocks`;
     const nav = Object.entries(CFG.pages).map(([id, p]) =>
       `<a class="tab" href="${p.file}"${id === PID ? ' aria-current="page"' : ""}>${esc(p.nav)}</a>`).join("");
     const crit = P.tests.map(t => { const m = META[t.k]; return `
@@ -130,7 +130,7 @@
       ? `${P.tests.some(t => t.k === "mos") ? "" : `<th data-k="mos" class="r">Safety</th>`}<th data-k="iv" class="r">DCF value</th><th data-k="mc" class="r">Mkt cap</th>`
       : `<th data-k="r3" class="r">3-yr</th><th data-k="beta" class="r">Beta</th>`;
     document.getElementById("app").innerHTML = `
-  <nav class="topnav" aria-label="Pages"><a class="brand" href="index.html">Stock Desk</a>${nav}
+  <nav class="topnav" aria-label="Pages"><a class="brand" href="index.html" aria-label="MacStocks home"><img src="logo.svg" alt="" width="30" height="30">MacStocks</a>${nav}
     <form class="lookup" id="lookup" role="search" autocomplete="off">
       <input id="lk" list="lk-list" placeholder="Analyze a ticker" aria-label="Ticker to analyze" spellcheck="false" autocapitalize="characters">
       <button type="submit">Analyze</button>

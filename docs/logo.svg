@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MacStocks">
+  <title>MacStocks</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16263a"/>
+      <stop offset="1" stop-color="#0b1520"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#2f9e66"/>
+      <stop offset="1" stop-color="#6ee7a8"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#bg)"/>
+  <!-- faint price grid -->
+  <path d="M10 44H54M10 32H54M10 20H54" stroke="#ffffff" stroke-opacity=".07" stroke-width="1.5"/>
+  <!-- an M drawn as a chart that climbs: each low is higher than the last -->
+  <path d="M11 49 L20 23 L28 41 L39 15 L45 27" fill="none" stroke="url(#line)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- breakout leg + arrow -->
+  <path d="M45 27 L53 11" fill="none" stroke="#6ee7a8" stroke-width="6" stroke-linecap="round"/>
+  <path d="M46 10.5 L54.5 9 L55.5 17.5" fill="none" stroke="#6ee7a8" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

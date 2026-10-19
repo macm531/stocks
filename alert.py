@@ -224,7 +224,7 @@ def build_email(hits):
                  ["Name", "Page", "Price", "52w high" if pb else "52w low", "From high" if pb else "Above low",
                   "5-yr trend", "Tests", "Metrics"])
     html = ("<div style='font-family:-apple-system,Segoe UI,sans-serif;color:#15202b'>"
-            "<h2 style='margin:0 0 6px'>Buy-zone alert</h2>"
+            "<h2 style="margin:0 0 6px">MacStocks buy-zone alert</h2>"
             f"<p style='margin:0 0 14px;color:#5d6b7a'>These pass {MIN_PASSES}+ of the 5 tests on their page and trade "
             f"{zone_desc}.</p>"
             f"<table cellspacing='0' style='border-collapse:collapse;font-size:14px'><tr>{th}</tr>{''.join(rows)}</table>"

@@ -171,7 +171,8 @@ tr.detail td { background: var(--bg); white-space: normal; padding: 16px 18px; }
 
 /* site nav */
 .topnav { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-bottom: 18px; }
-.topnav .brand { font-family: var(--f-display); font-weight: 700; font-size: 15px; margin-right: 14px; color: var(--ink); text-decoration: none; letter-spacing: -.01em; }
+.topnav .brand { display: inline-flex; align-items: center; gap: 9px; font-family: var(--f-display); font-weight: 700; font-size: 17px; margin-right: 14px; color: var(--ink); text-decoration: none; letter-spacing: -.015em; }
+.topnav .brand img { border-radius: 8px; display: block; }
 .topnav a.tab { text-decoration: none; color: var(--muted); font-weight: 600; font-size: 14px; padding: 7px 13px; border-radius: 999px; border: 1px solid transparent; }
 .topnav a.tab:hover { color: var(--ink); border-color: var(--line); }
 .topnav a.tab[aria-current="page"] { background: var(--ink); color: var(--bg); }

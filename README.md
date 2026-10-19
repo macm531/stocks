@@ -1,4 +1,4 @@
-# Value Quality Scanner
+# MacStocks
 
 Personal stock screener: ranks every NYSE and Nasdaq stock (5,000+) on PEG, debt-to-equity, ROIC, free-cash-flow yield and P/E, and emails when a shortlisted stock nears its 52-week low.
 
