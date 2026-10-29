@@ -1250,7 +1250,11 @@ ${topbar()}
   }
 
   // ---------- Track record: weekly picks vs SPY since they were picked ----------
+  // Two baskets per screen: "full" = every test passed, "zone" = shortlist stocks in the buy zone.
+  const BASKET = { full: { nav: "Track record", who: "full matches", empty: "No stock passed every test that week" },
+                   zone: { nav: "Buy-zone record", who: "buy-zone picks", empty: "Nothing on the shortlist was in the buy zone that day" } };
   async function renderTrack() {
+    const basket = P.basket || "full";
     let T, L = {};
     try { T = await getJSON("track.json", true); } catch (e) {
       $("track-body").innerHTML = `<div class="empty">The first weekly snapshot hasn't been recorded yet. It's taken during the next morning scan.</div>`; return;
@@ -1258,29 +1262,51 @@ ${topbar()}
     try { L = (await getJSON("live.json", true)).q || {}; } catch (e) {}
     const now = t => (L[t] && L[t][0]) || T.last[t];
     const spyNow = now("SPY");
-    const snaps = T.snaps.map(s => {
+    const all = T.snaps.map(s => {
       const rets = s.picks.map(([t, p]) => ({ t, p, now: now(t), ret: now(t) ? now(t) / p - 1 : null })).filter(x => x.ret != null);
       const avg = rets.length ? rets.reduce((a, x) => a + x.ret, 0) / rets.length : null;
       const spy = spyNow && s.spy ? spyNow / s.spy - 1 : null;
-      return { ...s, rets, avg, spy, ex: avg != null && spy != null ? avg - spy : null };
+      return { ...s, b: s.b || "full", rets, avg, spy, ex: avg != null && spy != null ? avg - spy : null };
     });
+    const snaps = all.filter(s => s.b === basket);
     const first = snaps.length ? snaps[0].d : null;
     const days = first ? Math.round((Date.now() - new Date(first)) / 864e5) : 0;
     const pages = Object.entries(CFG.pages).filter(([, p]) => p.kind === "stock" || p.kind === "etf");
-    const sum = pages.map(([pid, p]) => {
-      const ss = snaps.filter(s => s.page === pid && s.ex != null);
+    const summarize = (pid, b) => {
+      const ss = all.filter(s => s.page === pid && s.b === b && s.ex != null);
       const avg = k => ss.length ? ss.reduce((a, s) => a + s[k], 0) / ss.length : null;
-      return { pid, p, n: ss.length, avg: avg("avg"), spy: avg("spy"), ex: avg("ex"), beat: ss.filter(s => s.ex > 0).length };
-    });
+      return { n: ss.length, avg: avg("avg"), spy: avg("spy"), ex: avg("ex"), beat: ss.filter(s => s.ex > 0).length };
+    };
+    const sum = pages.map(([pid, p]) => ({ pid, p, ...summarize(pid, basket) }));
     const sign = v => v == null ? "—" : (v >= 0 ? "+" : "") + pct(v, 1);
+    // Fair head-to-head: only weeks where both baskets were recorded the same day, at least a week ago.
+    const cmp = pages.map(([pid, p]) => {
+      const pairs = all.filter(s => s.page === pid && s.b === "zone" && s.ex != null)
+        .map(z => ({ z, f: all.find(s => s.page === pid && s.b === "full" && s.d === z.d && s.ex != null) }))
+        .filter(x => x.f && (Date.now() - new Date(x.z.d)) / 864e5 >= 7);
+      const mean = k => pairs.length ? pairs.reduce((a, x) => a + x[k].ex, 0) / pairs.length : null;
+      const f = mean("f"), z = mean("z");
+      const lead = !pairs.length ? null : z > f ? "Buy zone" : f > z ? "Full matches" : "Tied";
+      return `<tr><td><b>${esc(p.nav)}</b></td>
+        <td class="n ${f > 0 ? "ok" : f < 0 ? "bad" : ""}">${sign(f)}</td>
+        <td class="n ${z > 0 ? "ok" : z < 0 ? "bad" : ""}">${sign(z)}</td>
+        <td class="n">${pairs.length}</td>
+        <td>${lead ? `<span class="pill ${lead === "Buy zone" ? "hold" : "review"}">${lead}</span>` : `<span class="muted">too early</span>`}</td></tr>`;
+    }).join("");
     $("track-body").innerHTML = `
-      <p class="track-note">${first ? `Tracking since <b>${esc(first)}</b> (${days} day${days === 1 ? "" : "s"}).` : ""} ${days < 180 ? "Results this early are mostly noise; judge the screens after 6–12 months of weekly snapshots." : ""}</p>
+      <p class="track-note">${first ? `Tracking ${BASKET[basket].who} since <b>${esc(first)}</b> (${days} day${days === 1 ? "" : "s"}).` : `No ${BASKET[basket].who} recorded yet; the first snapshot is taken with the next scan.`} ${days < 180 ? "Results this early are mostly noise; judge after 6–12 months of weekly snapshots." : ""}</p>
       <div class="tsum">${sum.map(x => `
         <div class="stat${x.ex > 0 ? " hot" : x.ex < 0 ? " bad" : ""}">
           <div class="eyebrow">${esc(x.p.nav)}</div>
           <div class="v">${sign(x.ex)}</div>
           <div class="s">${x.n ? `vs SPY on average · picks ${sign(x.avg)}, SPY ${sign(x.spy)} · beat SPY in ${x.beat} of ${x.n} snapshots` : "no snapshots yet"}</div>
         </div>`).join("")}</div>
+      <section class="block" data-read><div class="bhead"><div><h2>Full matches vs buy zone</h2>
+        <p>Head to head: each week both baskets are recorded on the same day, and only weeks at least 7 days old are compared, so neither side gets a head start. A stock can be in both baskets.</p></div></div>
+        <div class="tablebox"><table class="ttab cmp"><thead><tr><th>Screen</th><th class="r">Full matches vs SPY</th><th class="r">Buy zone vs SPY</th><th class="r">Weeks compared</th><th>Ahead so far</th></tr></thead>
+        <tbody>${cmp}</tbody></table></div>
+        <p class="muted an-note">Buy-zone tracking started ${esc((all.find(s => s.b === "zone") || {}).d || "with the next scan")}. The first head-to-head week is recorded with the next weekly snapshot and counts here a week after that.</p>
+      </section>
       ${pages.map(([pid, p]) => {
         const ss = snaps.filter(s => s.page === pid).slice().reverse();
         if (!ss.length) return "";
@@ -1289,18 +1315,24 @@ ${topbar()}
           <tbody>${ss.map(s => `<tr>
             <td>${esc(s.d)}</td><td class="n">${s.picks.length}</td><td class="n">${sign(s.avg)}</td><td class="n">${sign(s.spy)}</td>
             <td class="n ${s.ex > 0 ? "ok" : s.ex < 0 ? "bad" : ""}">${sign(s.ex)}</td>
-            <td class="tpicks">${s.rets.length ? s.rets.sort((a, b) => b.ret - a.ret).map(x => `<span data-analyze="${esc(x.t)}" class="${x.ret >= 0 ? "ok" : "bad"}">${esc(x.t)} ${sign(x.ret)}</span>`).join("") : `<span class="muted">No stock passed every test that week</span>`}</td></tr>`).join("")}
+            <td class="tpicks">${s.rets.length ? s.rets.sort((a, b) => b.ret - a.ret).map(x => `<span data-analyze="${esc(x.t)}" class="${x.ret >= 0 ? "ok" : "bad"}">${esc(x.t)} ${sign(x.ret)}</span>`).join("") : `<span class="muted">${BASKET[basket].empty}</span>`}</td></tr>`).join("")}
           </tbody></table></div></section>`;
       }).join("")}
       <section class="notes">
-        <div><h3>How it's measured</h3><p>Every week each screen's full matches (default settings, every test passed) are recorded with that day's price. "Picks since" is their equal-weight average price change from then to now; "SPY since" is the S&amp;P 500 ETF over the same span.</p></div>
+        <div><h3>How it's measured</h3><p>${basket === "full"
+          ? "Every week each screen's full matches (default settings, every test passed) are recorded with that day's price."
+          : "Every week each screen's buy-zone list (default settings: all tests but at most one passed, and in that screen's buy zone that day) is recorded with that day's price."}
+          "Picks since" is their equal-weight average price change from then to now; "SPY since" is the S&amp;P 500 ETF over the same span.</p></div>
         <div><h3>Why forward, not a backtest</h3><p>Free data only shows companies as they look today, so testing the screen on past years would quietly use information nobody had then. Recording picks as they happen can't cheat that way.</p></div>
         <div><h3>What's left out</h3><p>Prices only: dividends, trading costs and taxes aren't counted, for the picks or SPY. Stocks that drop out of the scan keep their last recorded price.</p></div>
       </section>`;
   }
   function trackShell() {
-    return `<header><div><div class="eyebrow">Forward test · screen picks vs the S&amp;P 500</div><h1>Track Record</h1>
-      <p>Does screening actually beat just owning the market? Each week the robot records what every screen picks, then this page tracks those picks against SPY.</p></div></header>
+    const zone = P.basket === "zone";
+    return `<header><div><div class="eyebrow">Forward test · ${zone ? "buy-zone picks" : "screen picks"} vs the S&amp;P 500</div><h1>${esc(P.title)}</h1>
+      <p>${zone
+        ? "Do stocks bought on a pullback do better than the screen's full matches? Each week the robot records every screen's buy-zone list, then this page tracks those picks against SPY."
+        : "Does screening actually beat just owning the market? Each week the robot records what every screen picks, then this page tracks those picks against SPY."}</p></div></header>
       <div id="track-body"><p class="muted">Loading…</p></div>`;
   }
 

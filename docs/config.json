@@ -329,7 +329,15 @@
       "file": "track.html",
       "nav": "Track record",
       "title": "Track Record",
-      "kind": "track"
+      "kind": "track",
+      "basket": "full"
+    },
+    "zonetrack": {
+      "file": "zonetrack.html",
+      "nav": "Buy-zone record",
+      "title": "Buy-Zone Record",
+      "kind": "track",
+      "basket": "zone"
     }
   },
   "dcf": {

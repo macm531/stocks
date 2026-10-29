@@ -15,7 +15,7 @@ on:
       mode:
         description: "What to run"
         type: choice
-        options: [prices, scan, fullscan, options, deploy]
+        options: [prices, scan, fullscan, options, snapshot, deploy]
         default: prices
 
 permissions:
@@ -83,6 +83,11 @@ jobs:
       - name: Scan option chains for the income page
         if: steps.mode.outputs.mode == 'options'
         run: python options.py || echo "option scan not saved; keeping previous data"
+
+      - name: Take track-record snapshots now
+        # fresh prices, then any weekly snapshots that are due (e.g. a basket that just started)
+        if: steps.mode.outputs.mode == 'snapshot'
+        run: python alert.py --force --prices-only && python track.py
 
       - name: Refresh prices and send alerts
         if: steps.mode.outputs.mode == 'prices'
