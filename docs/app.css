@@ -416,3 +416,15 @@ table.sectab td.bad { color: var(--fail); }
 .rankbar { position: relative; display: inline-block; width: 110px; height: 8px; border-radius: 4px; vertical-align: middle;
   background: linear-gradient(90deg, var(--pass-soft), var(--track) 50%, var(--fail-soft)); }
 .rankbar i { position: absolute; top: -3px; width: 4px; height: 14px; margin-left: -2px; border-radius: 2px; background: var(--ink); }
+
+/* My stocks: per-screen scores, judge picker, edit */
+.mscores { display: flex; flex-wrap: wrap; gap: 4px; }
+.mscore { font-size: 11.5px; padding: 1px 7px; border-radius: 5px; background: var(--track); color: var(--muted); white-space: nowrap; }
+.mscore b { color: var(--ink); font-family: var(--f-data); font-weight: 500; }
+.mscore.best { background: var(--accent-soft); color: var(--accent); }
+.mjudge { font: inherit; font-size: 12px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
+.medit { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 6px; }
+.medit input { font: inherit; font-size: 12.5px; width: 100px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
+.mstat .linkbtn + .linkbtn { margin-top: 2px; }
+.okc { color: var(--pass); } .badc { color: var(--fail); }
+.mrow { grid-template-columns: minmax(150px, 1fr) 120px minmax(240px, 1.5fr) minmax(0, 1.8fr) 110px; }

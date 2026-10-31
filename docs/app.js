@@ -942,7 +942,8 @@ ${topbar()}
       <form class="an-own" data-own="${esc(r.t)}">
         <b>${myHoldings().some(h => h.t === r.t) ? "In My stocks · update" : "Own it? Add to My stocks"}</b>
         <label>Bought at $<input name="buy" type="number" step="0.01" min="0" value="${r.px ? r.px.toFixed(2) : ""}"></label>
-        <label>Judge it on <select name="pid">${pids.map(id => `<option value="${id}"${id === (kind === "etf" ? "etf" : "buffett") ? " selected" : ""}>${esc(CFG.pages[id].nav)}</option>`).join("")}</select></label>
+        <label>Shares <input name="sh" type="number" step="any" min="0" placeholder="optional"></label>
+        <label>Judge it on <select name="pid"><option value="all" selected>All screens</option>${pids.map(id => `<option value="${id}">${esc(CFG.pages[id].nav)}</option>`).join("")}</select></label>
         <button type="submit" class="reset">${myHoldings().some(h => h.t === r.t) ? "Update" : "Add"}</button>
       </form>
       <div class="an-actions">
@@ -967,7 +968,8 @@ ${topbar()}
     $("an").addEventListener("submit", e => {
       const f = e.target.closest("form.an-own"); if (!f) return;
       e.preventDefault();
-      upsertHolding({ t: f.dataset.own, buy: parseFloat(f.buy.value) || null, pid: f.pid.value });
+      const sh = parseFloat(f.sh.value);
+      upsertHolding({ t: f.dataset.own, buy: parseFloat(f.buy.value) || null, pid: f.pid.value, ...(sh > 0 ? { sh } : {}) });
       f.querySelector("b").textContent = "Saved to My stocks";
       if (P.kind === "mine") renderMine();
     });
@@ -1181,6 +1183,9 @@ ${topbar()}
       sr.style.left = `${Math.min(window.innerWidth - 120, Math.max(8, rect.left + window.scrollX))}px`;
     });
     sr.addEventListener("mousedown", e => e.preventDefault());
+    // never leave the bubble behind: hide it on scroll or a click anywhere else
+    window.addEventListener("scroll", () => { sr.hidden = true; }, { passive: true });
+    document.addEventListener("mousedown", e => { if (!e.target.closest("#sel-read")) sr.hidden = true; });
     sr.addEventListener("click", () => { const t = String(window.getSelection()).trim(); sr.hidden = true; if (t) speak(t); });
     window.addEventListener("pagehide", stopVoice);
   }
@@ -1228,20 +1233,29 @@ ${topbar()}
   function upsertHolding(h) {
     const list = myHoldings(), i = list.findIndex(x => x.t === h.t);
     if (i >= 0) list[i] = { ...list[i], ...h };
-    else list.push({ ...h, d: new Date().toISOString().slice(0, 10) });
+    else list.push({ d: new Date().toISOString().slice(0, 10), ...h });  // a pasted list keeps its own date
     saveHoldings(list);
   }
+  const screensFor = kind => Object.entries(CFG.pages).filter(([, p]) => p.kind === kind).map(([id]) => id);
 
-  function sellCheck(h, d) {
-    const r = d.rows.find(x => x.t === h.t);
+  // Check one holding: on its chosen screen, or on every screen of its kind (judged by its best fit).
+  function sellCheck(h, data) {
+    const pid = h.pid || "all";
+    const inScan = data["scan.json"].rows.find(x => x.t === h.t), inEtf = data["etfs.json"].rows.find(x => x.t === h.t);
+    const r = pid === "all" ? (inScan || inEtf) : (CFG.pages[pid]?.data === "etfs.json" ? inEtf : inScan);
     if (!r) return { h, r: null };
-    const sc = scoreOn(h.pid, d, r), e = sc.e, rule = CFG.sell, sig = [];
+    const kind = r === inScan ? "stock" : "etf", d = r === inScan ? data["scan.json"] : data["etfs.json"];
+    const ids = pid === "all" ? screensFor(kind) : [pid];
+    const all = ids.map(id => ({ id, ...scoreOn(id, d, r) }));
+    const sc = all.slice().sort((a, b) => b.passes / b.N - a.passes / a.N || b.e.score - a.e.score)[0];
+    const e = sc.e, rule = CFG.sell, sig = [];
     const failing = sc.N - sc.passes >= rule.failTests;
     const today = new Date().toISOString().slice(0, 10);
     if (failing && !h.failSince) h.failSince = today;
     if (!failing) h.failSince = null;
     const days = h.failSince ? Math.round((Date.now() - new Date(h.failSince)) / 864e5) : 0;
-    if (failing) sig.push({ key: "fail", txt: `Fails ${sc.N - sc.passes} of ${sc.N} tests: ${sc.fails.join(", ")}${days ? ` (since ${h.failSince})` : ""}` });
+    const where = pid === "all" ? ` even on its best screen (${CFG.pages[sc.id].nav})` : "";
+    if (failing) sig.push({ key: "fail", txt: `Fails ${sc.N - sc.passes} of ${sc.N} tests${where}: ${sc.fails.join(", ")}${days ? ` (since ${h.failSince})` : ""}` });
     if (e.mos != null && e.mos <= -rule.overDcf / 100) sig.push({ key: "dcf", txt: `Price is ${pct(-e.mos, 0)} above its DCF value ($${fx(e.iv)})` });
     if (e.fromHigh != null && e.fromHigh <= -rule.drawdown / 100) sig.push({ key: "trend", txt: `${pct(-e.fromHigh, 0)} below its 52-week high: the uptrend may be broken` });
     const gain = h.buy && r.px ? r.px / h.buy - 1 : null;
@@ -1249,55 +1263,75 @@ ${topbar()}
     if (r.r2 != null && r.r2 < rule.choppy) sig.push({ key: "chop", txt: `Chart has turned choppy (steadiness R² ${fx(r.r2)})` });
     const persisted = failing && days >= rule.persistDays;
     const status = sig.length >= 2 || persisted ? "sell" : sig.length === 1 ? "review" : "hold";
-    return { h, r, sc, e, sig, gain, status };
+    const cost = h.buy && h.sh ? h.buy * h.sh : null, value = r.px && h.sh ? r.px * h.sh : null;
+    return { h, r, kind, all, sc, e, sig, gain, status, cost, value };
   }
+
+  const dollars = v => v == null ? "—" : (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: Math.abs(v) >= 100 ? 0 : 2, minimumFractionDigits: Math.abs(v) >= 100 ? 0 : 2 });
+  let mineEditing = null;
 
   async function renderMine() {
     const data = { "scan.json": await dataset("scan.json"), "etfs.json": await dataset("etfs.json") };
     const list = myHoldings();  // read after loading, so stocks added meanwhile aren't missed
-    const checks = list.map(h => sellCheck({ ...h }, data[CFG.pages[h.pid]?.data || "scan.json"]));
+    const checks = list.map(h => sellCheck({ ...h }, data));
     // record when each started failing, merging into whatever is stored now
     const stored = myHoldings();
     for (const c of checks) { const x = stored.find(h => h.t === c.h.t); if (x) x.failSince = c.h.failSince; }
     saveHoldings(stored);
     const n = s => checks.filter(c => c.status === s).length;
-    const gains = checks.filter(c => c.gain != null).map(c => c.gain);
+    const priced = checks.filter(c => c.cost != null && c.value != null);
+    const cost = priced.reduce((a, c) => a + c.cost, 0), value = priced.reduce((a, c) => a + c.value, 0);
     $("mine-summary").innerHTML = `
-      <div class="stat"><div class="eyebrow">Holdings</div><div class="v">${list.length}</div><div class="s">saved in this browser</div></div>
+      <div class="stat"><div class="eyebrow">Holdings</div><div class="v">${list.length}</div><div class="s">${priced.length ? `you paid ${dollars(cost)} · now ${dollars(value)} · <b class="${value >= cost ? "okc" : "badc"}">${value >= cost ? "+" : ""}${dollars(value - cost)} (${pct(value / cost - 1, 0)})</b>` : "add share counts to see totals"}</div></div>
       <div class="stat${n("sell") ? " bad" : ""}"><div class="eyebrow">Sell signals</div><div class="v">${n("sell")}</div><div class="s">2+ warnings, or failing for ${CFG.sell.persistDays}+ days</div></div>
       <div class="stat${n("review") ? " warnc" : ""}"><div class="eyebrow">Review</div><div class="v">${n("review")}</div><div class="s">one warning</div></div>
-      <div class="stat${n("hold") ? " hot" : ""}"><div class="eyebrow">Hold</div><div class="v">${n("hold")}</div><div class="s">${gains.length ? `average gain ${pct(gains.reduce((a, b) => a + b, 0) / gains.length, 1)}` : "no warnings"}</div></div>`;
+      <div class="stat${n("hold") ? " hot" : ""}"><div class="eyebrow">Hold</div><div class="v">${n("hold")}</div><div class="s">no warnings</div></div>`;
     const label = { sell: "Sell signal", review: "Review", hold: "Hold" };
+    const order = ["sell", "review", "hold"];
     $("mine-list").innerHTML = !checks.length
       ? `<div class="empty">No stocks yet. Add one above, or open any stock with Analyze and choose "Add to My stocks".</div>`
-      : checks.sort((a, b) => ["sell", "review", "hold"].indexOf(a.status) - ["sell", "review", "hold"].indexOf(b.status)).map(c => !c.r
-        ? `<div class="mrow"><div class="mname"><span class="tk">${esc(c.h.t)}</span> <span class="muted">no longer in the scan</span></div><button type="button" class="reset" data-del="${esc(c.h.t)}">Remove</button></div>`
-        : `<div class="mrow ${c.status}">
+      : checks.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || (b.value || 0) - (a.value || 0)).map(c => {
+        if (!c.r) return `<div class="mrow"><div class="mname"><span class="tk">${esc(c.h.t)}</span> <span class="muted">not in the scan</span></div><button type="button" class="reset" data-del="${esc(c.h.t)}">Remove</button></div>`;
+        const pid = c.h.pid || "all";
+        const judge = `<select class="mjudge" data-judge="${esc(c.r.t)}" aria-label="Screen to judge ${esc(c.r.t)} on">
+          <option value="all"${pid === "all" ? " selected" : ""}>All screens</option>
+          ${screensFor(c.kind).map(id => `<option value="${id}"${pid === id ? " selected" : ""}>${esc(CFG.pages[id].nav)}</option>`).join("")}</select>`;
+        const scores = c.all.map(x => `<span class="mscore${x.id === c.sc.id && c.all.length > 1 ? " best" : ""}" title="${esc(CFG.pages[x.id].nav)}">${esc(CFG.pages[x.id].nav)} <b>${x.passes}/${x.N}</b></span>`).join("");
+        const paid = !c.h.buy ? "No buy price"
+          : c.h.sh ? `${c.h.sh.toLocaleString()} sh at $${fx(c.h.buy)} = <b>${dollars(c.cost)}</b> paid · now ${dollars(c.value)} · <b class="${c.gain >= 0 ? "ok" : "bad"}">${c.gain >= 0 ? "+" : ""}${dollars(c.value - c.cost)} (${pct(c.gain, 1)})</b>`
+          : `Bought at $${fx(c.h.buy)} · <b class="${c.gain >= 0 ? "ok" : "bad"}">${c.gain >= 0 ? "+" : ""}${pct(c.gain, 1)}</b>`;
+        const edit = mineEditing === c.r.t ? `<form class="medit" data-edit="${esc(c.r.t)}">
+          <label>Bought at $<input name="buy" type="number" step="0.0001" min="0" value="${c.h.buy ?? ""}"></label>
+          <label>Shares <input name="sh" type="number" step="any" min="0" value="${c.h.sh ?? ""}"></label>
+          <button type="submit" class="reset">Save</button><button type="button" class="linkbtn" data-cancel>Cancel</button></form>` : "";
+        return `<div class="mrow ${c.status}">
           <div class="mname" data-analyze="${esc(c.r.t)}"><span class="tk">${esc(c.r.t)}</span> ${priceTag(c.r)}<div class="nm">${esc(c.r.n)}</div><div class="secrow">${secTag(c.r, false)}</div></div>
           <div class="mspark">${spark(c.e, 110, 30)}</div>
-          <div class="mfacts"><span>Judged on <b>${esc(CFG.pages[c.h.pid].nav)}</b>: ${c.sc.passes}/${c.sc.N} tests</span>
-            <span>${c.h.buy ? `Bought at $${fx(c.h.buy)} · <b class="${c.gain >= 0 ? "ok" : "bad"}">${c.gain >= 0 ? "+" : ""}${pct(c.gain, 1)}</b>` : "No buy price"} · since ${esc(c.h.d || "")}</span></div>
+          <div class="mfacts"><span class="mjudgerow">Judge on ${judge}</span><span class="mscores">${scores}</span>
+            <span>${paid}${c.h.d ? ` · since ${esc(c.h.d)}` : ""}</span>${edit}</div>
           <div class="msig">${c.sig.length ? `<ul>${c.sig.map(x => `<li>${esc(x.txt)}</li>`).join("")}</ul>` : `<span class="muted">No warnings</span>`}</div>
-          <div class="mstat"><span class="pill ${c.status}">${label[c.status]}</span><button type="button" class="linkbtn" data-del="${esc(c.r.t)}">Remove</button></div>
-        </div>`).join("");
+          <div class="mstat"><span class="pill ${c.status}">${label[c.status]}</span><button type="button" class="linkbtn" data-editbtn="${esc(c.r.t)}">Edit</button><button type="button" class="linkbtn" data-del="${esc(c.r.t)}">Remove</button></div>
+        </div>`;
+      }).join("");
   }
 
   function mineShell() {
     const sr = CFG.sell;
     return `
       <header><div><div class="eyebrow">Your holdings · sell signals</div><h1>My Stocks</h1>
-        <p>Stocks you own, re-checked against the screen you picked every time you open this page. Saved in this browser only: your list stays on this device until you remove it.</p></div></header>
+        <p>Stocks you own, re-checked every time you open this page, on every screen or on the one you pick. Saved in this browser only: your list stays on this device until you remove it.</p></div></header>
       <form class="mine-add" id="mine-add" autocomplete="off">
         <input id="mine-t" list="lk-list" placeholder="Ticker" aria-label="Ticker" required>
-        <input id="mine-buy" type="number" step="0.01" min="0" placeholder="Bought at $ (optional)" aria-label="Buy price">
-        <select id="mine-pid" aria-label="Screen to judge it on">${Object.entries(CFG.pages).filter(([, p]) => p.kind === "stock" || p.kind === "etf").map(([id, p]) => `<option value="${id}"${id === "buffett" ? " selected" : ""}>Judge on ${esc(p.nav)}</option>`).join("")}</select>
+        <input id="mine-buy" type="number" step="0.0001" min="0" placeholder="Bought at $ per share" aria-label="Buy price per share">
+        <input id="mine-sh" type="number" step="any" min="0" placeholder="Shares (optional)" aria-label="Number of shares">
+        <select id="mine-pid" aria-label="Screen to judge it on"><option value="all" selected>Judge on all screens</option>${Object.entries(CFG.pages).filter(([, p]) => p.kind === "stock" || p.kind === "etf").map(([id, p]) => `<option value="${id}">Judge on ${esc(p.nav)}</option>`).join("")}</select>
         <button type="submit" class="run">Add stock</button>
       </form>
       <p class="err" id="mine-err" hidden></p>
       <div class="summary" id="mine-summary"></div>
       <div class="mlist" id="mine-list"><p class="muted">Loading…</p></div>
       <section class="notes">
-        <div><h3>When a warning appears</h3><p>Fails ${sr.failTests}+ of its screen's tests · price ${sr.overDcf}%+ above its DCF value · ${sr.drawdown}%+ below its 52-week high · down ${sr.stop}%+ from your buy price · chart steadiness under ${sr.choppy}.</p></div>
+        <div><h3>When a warning appears</h3><p>Fails ${sr.failTests}+ of its screen's tests (with "All screens", its best-fitting screen) · price ${sr.overDcf}%+ above its DCF value · ${sr.drawdown}%+ below its 52-week high · down ${sr.stop}%+ from your buy price · chart steadiness under ${sr.choppy}.</p></div>
         <div><h3>Review vs sell signal</h3><p>One warning means look again. Two or more at once, or failing the tests for ${sr.persistDays}+ days in a row, is a sell signal. That's roughly "two bad quarters", tracked from the first day this page saw it fail.</p></div>
         <div><h3>Moving devices</h3><p><button type="button" class="reset" id="mine-copy">Copy my list</button> then paste it on the other device: <button type="button" class="reset" id="mine-paste">Paste a list</button></p><textarea id="mine-io" rows="3" hidden placeholder="Paste your list here, then press Paste a list again"></textarea></div>
       </section>`;
@@ -1306,19 +1340,37 @@ ${topbar()}
     $("mine-add").addEventListener("submit", async e => {
       e.preventDefault();
       const t = $("mine-t").value.trim().toUpperCase().replace(/\./g, "-"), pid = $("mine-pid").value;
-      const d = await dataset(CFG.pages[pid].data);
-      if (!d.rows.some(r => r.t === t)) { $("mine-err").hidden = false; $("mine-err").textContent = `${t} isn't on the ${CFG.pages[pid].nav} data. Stocks go on a stock screen, funds on ETFs.`; return; }
+      const scan = await dataset("scan.json"), etfs = await dataset("etfs.json");
+      const pool = pid === "all" ? [...scan.rows, ...etfs.rows] : (await dataset(CFG.pages[pid].data)).rows;
+      const r = pool.find(x => x.t === t);
+      if (!r) { $("mine-err").hidden = false; $("mine-err").textContent = pid === "all" ? `${t} isn't in the scan (over-the-counter shares, warrants and some funds aren't covered).` : `${t} isn't on the ${CFG.pages[pid].nav} data. Stocks go on a stock screen, funds on ETFs.`; return; }
       $("mine-err").hidden = true;
-      const r = d.rows.find(x => x.t === t);
-      upsertHolding({ t, pid, buy: parseFloat($("mine-buy").value) || r.px || null });
-      $("mine-t").value = ""; $("mine-buy").value = "";
+      const sh = parseFloat($("mine-sh").value);
+      upsertHolding({ t, pid, buy: parseFloat($("mine-buy").value) || r.px || null, ...(sh > 0 ? { sh } : {}) });
+      $("mine-t").value = ""; $("mine-buy").value = ""; $("mine-sh").value = "";
       renderMine();
     });
     $("mine-list").addEventListener("click", e => {
       const del = e.target.closest("[data-del]");
       if (del) { saveHoldings(myHoldings().filter(h => h.t !== del.dataset.del)); renderMine(); return; }
+      const ed = e.target.closest("[data-editbtn]");
+      if (ed) { mineEditing = mineEditing === ed.dataset.editbtn ? null : ed.dataset.editbtn; renderMine(); return; }
+      if (e.target.closest("[data-cancel]")) { mineEditing = null; renderMine(); return; }
+      if (e.target.closest("select, form")) return;
       const a = e.target.closest("[data-analyze]");
       if (a) analyze(a.dataset.analyze);
+    });
+    $("mine-list").addEventListener("change", e => {
+      const sel = e.target.closest("[data-judge]");
+      if (sel) { upsertHolding({ t: sel.dataset.judge, pid: sel.value, failSince: null }); renderMine(); }
+    });
+    $("mine-list").addEventListener("submit", e => {
+      const f = e.target.closest("form[data-edit]"); if (!f) return;
+      e.preventDefault();
+      const buy = parseFloat(f.buy.value), sh = parseFloat(f.sh.value);
+      const list = myHoldings(), h = list.find(x => x.t === f.dataset.edit);
+      if (h) { h.buy = buy > 0 ? buy : null; if (sh > 0) h.sh = sh; else delete h.sh; saveHoldings(list); }
+      mineEditing = null; renderMine();
     });
     $("mine-copy").addEventListener("click", () => {
       const txt = JSON.stringify(myHoldings());
@@ -1331,7 +1383,7 @@ ${topbar()}
       try {
         const list = JSON.parse(io.value);
         if (!Array.isArray(list)) throw new Error("not a list");
-        list.forEach(h => h && h.t && h.pid && upsertHolding(h));
+        list.forEach(h => h && h.t && upsertHolding({ pid: "all", ...h }));
         io.value = ""; io.hidden = true; renderMine();
       } catch (err) { $("mine-err").hidden = false; $("mine-err").textContent = "That doesn't look like a copied list. Copy it again on the other device."; }
     });
