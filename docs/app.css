@@ -428,3 +428,5 @@ table.sectab td.bad { color: var(--fail); }
 .mstat .linkbtn + .linkbtn { margin-top: 2px; }
 .okc { color: var(--pass); } .badc { color: var(--fail); }
 .mrow { grid-template-columns: minmax(150px, 1fr) 120px minmax(240px, 1.5fr) minmax(0, 1.8fr) 110px; }
+
+.okmsg { margin: 0; padding: 10px 14px; border-radius: 10px; background: var(--pass-soft); color: var(--pass); font-weight: 600; }

@@ -1315,6 +1315,26 @@ ${topbar()}
       }).join("");
   }
 
+  // One-click import: mine.html#import=<base64 list>. The part after # never leaves the browser,
+  // so holdings stay private; the link is cleared from the address bar once loaded.
+  function importFromLink() {
+    const m = location.hash.match(/^#import=([A-Za-z0-9_-]+=*)$/);
+    if (!m) return;
+    try {
+      const b64 = m[1].replace(/-/g, "+").replace(/_/g, "/");
+      const list = JSON.parse(decodeURIComponent(escape(atob(b64))));
+      if (!Array.isArray(list)) throw new Error("not a list");
+      list.forEach(h => h && h.t && upsertHolding({ pid: "all", ...h }));
+      $("mine-err").hidden = false;
+      $("mine-err").className = "okmsg";
+      $("mine-err").textContent = `Added ${list.length} holdings from your link. They're saved in this browser; you can close the link.`;
+    } catch (e) {
+      $("mine-err").hidden = false;
+      $("mine-err").textContent = "That import link didn't work. Ask for a fresh one, or use Paste a list below.";
+    }
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+
   function mineShell() {
     const sr = CFG.sell;
     return `
@@ -1343,7 +1363,7 @@ ${topbar()}
       const scan = await dataset("scan.json"), etfs = await dataset("etfs.json");
       const pool = pid === "all" ? [...scan.rows, ...etfs.rows] : (await dataset(CFG.pages[pid].data)).rows;
       const r = pool.find(x => x.t === t);
-      if (!r) { $("mine-err").hidden = false; $("mine-err").textContent = pid === "all" ? `${t} isn't in the scan (over-the-counter shares, warrants and some funds aren't covered).` : `${t} isn't on the ${CFG.pages[pid].nav} data. Stocks go on a stock screen, funds on ETFs.`; return; }
+      if (!r) { $("mine-err").hidden = false; $("mine-err").className = "err"; $("mine-err").textContent = pid === "all" ? `${t} isn't in the scan (over-the-counter shares, warrants and some funds aren't covered).` : `${t} isn't on the ${CFG.pages[pid].nav} data. Stocks go on a stock screen, funds on ETFs.`; return; }
       $("mine-err").hidden = true;
       const sh = parseFloat($("mine-sh").value);
       upsertHolding({ t, pid, buy: parseFloat($("mine-buy").value) || r.px || null, ...(sh > 0 ? { sh } : {}) });
@@ -1385,7 +1405,7 @@ ${topbar()}
         if (!Array.isArray(list)) throw new Error("not a list");
         list.forEach(h => h && h.t && upsertHolding({ pid: "all", ...h }));
         io.value = ""; io.hidden = true; renderMine();
-      } catch (err) { $("mine-err").hidden = false; $("mine-err").textContent = "That doesn't look like a copied list. Copy it again on the other device."; }
+      } catch (err) { $("mine-err").hidden = false; $("mine-err").className = "err"; $("mine-err").textContent = "That doesn't look like a copied list. Copy it again on the other device."; }
     });
   }
 
@@ -1680,7 +1700,10 @@ ${topbar()}
     document.title = `${P.title} · MacStocks`;
     $("app").innerHTML = topbar() + `<div class="special">${P.kind === "mine" ? mineShell() : trackShell()}</div>`;
     wireLookup(); wireVoice();
-    if (P.kind === "mine") { wireMine(); renderMine(); } else renderTrack();
+    if (P.kind === "mine") {
+      wireMine(); importFromLink(); renderMine();
+      window.addEventListener("hashchange", () => { if (location.hash.startsWith("#import=")) { importFromLink(); renderMine(); } });
+    } else renderTrack();
     $("app").addEventListener("click", e => {
       const a = e.target.closest(".tpicks [data-analyze]"); if (a) analyze(a.dataset.analyze);
     });
