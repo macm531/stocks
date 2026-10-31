@@ -55,3 +55,6 @@ Finds cash-secured puts and covered calls to sell. Universe: stocks in `scan.jso
 
 ## Rising stars (`rising.html`)
 Growth at a reasonable price among $0.3B-$10B companies (financials and REITs excluded). Page-level overrides in `config.json` relax the chart filters (R² ≥ 0.6, ≥10%/yr over 5 years) and widen the buy zone (15-40% below the 52-week high). Tests: revenue growth > 15%, expected EPS growth > 15%, PEG < 1.5, P/E < 35, D/E < 0.5, ROIC > 12%, interest coverage > 5×, share count growth < 2%/yr; optional: revenue up 75%+ of years, FCF yield > 2%, analyst upside > 10%, price ≤ 50% above DCF, insider ownership > 5% (`ins`, from Yahoo's heldPercentInsiders). Pages can override `trend`, `returns` and `zone`; `maxCapB` caps size.
+
+## Sector-relative judging
+`app.js` builds per-sector distributions from every scanned stock (`peers()`, `sectorRank()`). Each stock page has a "Judge against its sector" switch: when on, a test passes if the stock ranks in the viewer's top X% of its sector (default 35%); sectors with fewer than 10 comparable companies fall back to the fixed bar. Every test line shows the sector median and how many of its sector it beats, and each stock report has a "Versus its sector" table. Alerts and the record pages keep the fixed bars.

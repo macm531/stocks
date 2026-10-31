@@ -202,6 +202,11 @@ ${topbar()}
       </div>
       <hr>
       <div class="eyebrow">Criteria</div>
+      ${isStock() ? `<div class="crit" id="crit-sec">
+        <div class="crit-top"><label class="sw"><input type="checkbox" id="o-secon"><i></i><span>Judge against its sector</span></label><span class="cnt" id="c-sec"></span></div>
+        <div class="field"><span>Must rank in the top</span><input id="o-sectop" type="number" step="5" min="1" max="100"><span>% of its sector</span></div>
+        <small>Each test compares the stock with every scanned company in its sector instead of one bar for all, so the best utility and the best software company compete on equal terms. Tests with under ${PEER_MIN} comparable companies keep their fixed bar. Email alerts and the record pages use the fixed bars.</small>
+      </div>` : ""}
       ${crit}
       <hr>
       ${stockOpts}
@@ -266,7 +271,7 @@ ${topbar()}
     const tr = { ...CFG.trend, ...(P.trend || {}) }, rt = { ...CFG.returns, ...(P.returns || {}) }, zn = { ...CFG.zone, ...(P.zone || {}) };
     const d = { off: Object.fromEntries((P.tests || []).filter(t => t.on === false).map(t => [t.k, true])), zoneOn: true, showSettings: true, low: CFG.lowPct, trendOn: tr.on, r2: tr.r2, retOn: rt.on, retMin: rt.min, period: rt.period, zmode: zn.mode, pull: zn.pullback, pullMax: zn.pullbackMax };
     for (const t of P.tests) d[t.k] = t.t;
-    if (isStock()) Object.assign(d, { uni: P.universe === "bc" ? "all" : P.universe, sector: !!P.sectorPE, fin: !!P.excludeFin, mcap: P.minCapB || 0, mcapMax: P.maxCapB || 0, ...CFG.dcf });
+    if (isStock()) Object.assign(d, { uni: P.universe === "bc" ? "all" : P.universe, sector: !!P.sectorPE, fin: !!P.excludeFin, mcap: P.minCapB || 0, mcapMax: P.maxCapB || 0, secOn: !!P.sectorMode, secTop: P.sectorTop || 35, ...CFG.dcf });
     return d;
   }
   function syncInputs() {
@@ -293,6 +298,10 @@ ${topbar()}
       if ($("o-sector")) $("o-sector").checked = S.sector;
       $("o-fin").checked = S.fin; $("o-mcap").value = S.mcap; $("o-mcapmax").value = S.mcapMax;
       if ($("o-uni")) $("o-uni").value = S.uni;
+      $("o-secon").checked = S.secOn; $("o-sectop").value = S.secTop; $("o-sectop").disabled = !S.secOn;
+      $("crit-sec").classList.toggle("off", !S.secOn);
+      $("c-sec").textContent = S.secOn ? "on" : "off";
+      for (const t of P.tests) $("t-" + t.k).disabled = !on(t) || S.secOn;
       $("o-disc").value = S.disc; $("o-term").value = S.term; $("o-gcap").value = S.gcap;
     }
   }
@@ -301,29 +310,99 @@ ${topbar()}
   function save() { try { localStorage.setItem(KEY(), JSON.stringify({ showSettings: S.showSettings })); } catch (e) {} }
 
   // ---------- scoring ----------
+  // Values computed from raw fields (the DCF depends on the viewer's DCF settings).
+  function derive(r) {
+    const v = dcf(r), mos = v ? v.mos : null;
+    return { iv: v ? v.iv : null, dcfg: v ? v.g : null, mos,
+      prem: mos == null ? null : -mos,  // how far the price sits above DCF value
+      epsg: r.feps && r.teps && r.teps > 0 ? r.feps / r.teps - 1 : null,  // analysts' expected next-year EPS growth
+      tup: r.tgt && r.px ? r.tgt / r.px - 1 : null,  // analysts' mean target vs price
+      nm: r.h && r.h.nm ? [...r.h.nm].reverse().find(x => x != null) ?? null : null };  // latest net margin
+  }
+
+  // Report table: each measure next to its sector's median and the stock's rank among its peers.
+  const SECTOR_ROWS = [
+    ["pe", "P/E", v => fx(v, 1) + "×"], ["peg", "PEG", v => fx(v, 2)], ["de", "Debt-to-equity", v => fx(v, 2)],
+    ["roic", "ROIC", v => pct(v, 0)], ["roe", "ROE", v => pct(v, 0)], ["fcfy", "FCF yield", v => pct(v, 1)],
+    ["nm", "Net margin", v => pct(v, 1)], ["rg", "Revenue growth", v => pct(v, 0)], ["epsg", "Expected EPS growth", v => pct(v, 0)],
+    ["icov", "Interest coverage", v => v >= 999 ? "no debt" : fx(v, 1) + "×"], ["shchg", "Share count change", v => (v > 0 ? "+" : "") + fx(v, 1) + "%/yr"],
+    ["cagrL", "Yearly return (up to 10 yrs)", v => pct(v, 1)], ["mos", "Margin of safety (DCF)", v => pct(v, 0)],
+  ];
+  function sectorTableHTML(e) {
+    const rows = SECTOR_ROWS.map(([k, label, f]) => {
+      const v = e[k], rk = sectorRank(e.sec, k, v);
+      if (v == null || !rk || (PEER_VALID[k] && !PEER_VALID[k](v))) return "";
+      const top = Math.max(1, Math.round(rk.top * 100)), good = rk.top <= 0.35, bad = rk.top >= 0.65;
+      return `<tr><td>${label}</td><td class="n"><b>${f(v)}</b></td><td class="n">${f(rk.med)}</td>
+        <td class="n ${good ? "ok" : bad ? "bad" : ""}">${rk.top <= 0.5 ? `top ${top}%` : `bottom ${Math.max(1, Math.round((1 - rk.top) * 100))}%`}</td>
+        <td><span class="rankbar" title="Position among ${rk.n} companies (left = best)"><i style="left:${Math.min(98, rk.top * 100)}%"></i></span></td></tr>`;
+    }).filter(Boolean);
+    if (!rows.length) return "";
+    const n = peers().by[e.sec] ? Math.max(...Object.values(peers().by[e.sec]).map(a => a.length)) : 0;
+    return `<section class="an-sec" data-read>
+      <h3 class="an-sub">Versus its sector ${readBtn()}</h3>
+      <p class="muted">Compared with ${n.toLocaleString()} scanned ${esc(e.sec)} companies. "Top 20%" means only a fifth of the sector does better; for P/E, PEG, debt and dilution, lower counts as better.</p>
+      <div class="hold-wrap"><table class="hold sectab"><thead><tr><th>Measure</th><th class="r">${esc(e.t)}</th><th class="r">Sector median</th><th class="r">Rank</th><th>Best → worst</th></tr></thead>
+      <tbody>${rows.join("")}</tbody></table></div>
+    </section>`;
+  }
+
+  // ---------- sector peers: every scanned stock in the same sector ----------
+  const PEER_MIN = 10;  // fewer comparable companies than this and a test keeps its fixed bar
+  const LOWER_BETTER = new Set(["pe", "peg", "de", "dny", "shchg", "prem"]);
+  const PEER_VALID = { pe: v => v > 0, peg: v => v > 0, de: v => v >= 0, dny: v => v >= 0, icov: v => v > -1e6 };
+  let peerCache = null;
+  function peers() {
+    const key = [DATA && DATA.at, DATA && DATA.rows.length, S.disc, S.term, S.gcap].join("|");
+    if (peerCache && peerCache.key === key) return peerCache;
+    const keys = new Set([...Object.keys(META), "roe", "nm", "cagrL", "mos"]);
+    const by = {};
+    for (const r of DATA.rows) {
+      if (!r.sec || r.sec === "Unknown") continue;
+      const d = derive(r), sec = (by[r.sec] = by[r.sec] || {});
+      for (const k of keys) {
+        const v = d[k] !== undefined ? d[k] : r[k];
+        if (v == null || typeof v !== "number" || (PEER_VALID[k] && !PEER_VALID[k](v))) continue;
+        (sec[k] = sec[k] || []).push(v);
+      }
+    }
+    for (const sec of Object.values(by)) for (const k in sec) sec[k].sort((a, b) => a - b);
+    return (peerCache = { key, by });
+  }
+  // Where x ranks in its sector: top = share of peers that do better (0 = best in sector).
+  function sectorRank(sec, k, x) {
+    const arr = DATA && isStock() ? peers().by[sec]?.[k] : null;
+    if (!arr || arr.length < PEER_MIN || x == null) return null;
+    let lo = 0, hi = arr.length;
+    if (LOWER_BETTER.has(k)) { while (lo < hi) { const m = (lo + hi) >> 1; arr[m] < x ? lo = m + 1 : hi = m; } return { top: lo / arr.length, med: arr[arr.length >> 1], n: arr.length }; }
+    while (lo < hi) { const m = (lo + hi) >> 1; arr[m] <= x ? lo = m + 1 : hi = m; }
+    return { top: (arr.length - lo) / arr.length, med: arr[arr.length >> 1], n: arr.length };
+  }
+
   function evaluate(r) {
     const ev = {};
-    if (isStock()) {
-      const v = dcf(r), mos = v ? v.mos : null;
-      r = { ...r, iv: v ? v.iv : null, dcfg: v ? v.g : null, mos,
-        prem: mos == null ? null : -mos,  // how far the price sits above DCF value
-        epsg: r.feps && r.teps && r.teps > 0 ? r.feps / r.teps - 1 : null,  // analysts' expected next-year EPS growth
-        tup: r.tgt && r.px ? r.tgt / r.px - 1 : null };  // analysts' mean target vs price
-    }
+    if (isStock()) r = { ...r, ...derive(r) };
     for (const t of P.tests) {
       const m = META[t.k], v = r[t.k], T = S[t.k];
       if (v == null) { ev[t.k] = { pass: false, s: 0, na: true }; continue; }
       if (m.valid && !m.valid(v)) { ev[t.k] = { pass: false, s: 0 }; continue; }
       const x = m.unit(v);
-      let pass = t.dir === "lt" ? x < T : t.dir === "ge" ? x >= T : x > T;
-      const s = m.range ? clamp((x - m.range[0]) / (m.range[1] - m.range[0]))
-        : t.dir === "lt" ? (x <= 0.5 * T ? 1 : clamp((1.5 * T - x) / T)) : clamp((x - T / 3) / (T * 1.67 - T / 3));
-      const e = { pass, s };
-      if (t.k === "pe" && isStock()) {
-        e.secMed = DATA.medians[r.sec] ?? DATA.medians._market;
-        e.underSec = !S.sector || e.secMed == null || v < e.secMed;
-        e.pass = pass && e.underSec;
+      const rk = isStock() ? sectorRank(r.sec, t.k, v) : null;
+      let e;
+      if (S.secOn && rk) {
+        // judged against its sector: must rank in the viewer's top X% of the sector
+        e = { pass: rk.top <= S.secTop / 100, s: clamp(1 - rk.top), rel: true };
+      } else {
+        const pass = t.dir === "lt" ? x < T : t.dir === "ge" ? x >= T : x > T;
+        const s = m.range ? clamp((x - m.range[0]) / (m.range[1] - m.range[0]))
+          : t.dir === "lt" ? (x <= 0.5 * T ? 1 : clamp((1.5 * T - x) / T)) : clamp((x - T / 3) / (T * 1.67 - T / 3));
+        e = { pass, s };
+        if (t.k === "pe" && isStock()) {
+          e.underSec = !S.sector || rk == null || v < rk.med;
+          e.pass = pass && e.underSec;
+        }
       }
+      if (rk) { e.top = rk.top; e.secMed = rk.med; e.peers = rk.n; }
       ev[t.k] = e;
     }
     const act = AT();
@@ -405,6 +484,7 @@ ${topbar()}
   const missDetail = (r, t) => t.k === "mos" && r.mos != null && r.mos < 0
     ? `price is ${pct(-r.mos, 0)} above DCF value $${fx(r.iv)}, ${needTxt(t).replace("over", "at least")} below`
     : t.k === "mos" && r.mos != null ? `price is ${pct(r.mos, 0)} below DCF value $${fx(r.iv)}, ${needTxt(t)}`
+    : r.ev[t.k] && r.ev[t.k].rel ? `${META[t.k].show(r)}: better than ${Math.round((1 - r.ev[t.k].top) * 100)}% of ${r.sec}; needs the top ${S.secTop}%`
     : `${META[t.k].show(r)}, ${needTxt(t)}`;
 
   // Stocks one test short of a full match, with the test they missed.
@@ -505,8 +585,13 @@ ${topbar()}
     const m = META[t.k], e = r.ev[t.k];
     if (e.na) return "No data.";
     if (m.bad && m.bad(r)) return m.bad(r);
-    let txt = `${m.show(r)} vs ${t.dir === "lt" ? "limit" : "bar"} ${unitTxt(t, S[t.k])}.`;
-    if (t.k === "pe" && isStock()) txt += ` Sector median ${fx(e.secMed, 1)}×${S.sector && !e.underSec ? " (above it)" : ""}.`;
+    const medTxt = e.secMed != null ? m.show({ ...r, [t.k]: e.secMed }) : null;
+    const beats = e.top != null ? Math.round((1 - e.top) * 100) : null;  // share of the sector it does better than
+    let txt = e.rel
+      ? `${m.show(r)}: better than ${beats}% of ${r.sec}; needs to be in the top ${S.secTop}%.`
+      : `${m.show(r)} vs ${t.dir === "lt" ? "limit" : "bar"} ${unitTxt(t, S[t.k])}.`;
+    if (medTxt != null) txt += ` Sector median ${medTxt}${e.rel ? "" : `; better than ${beats}% of its sector`}.`;
+    if (t.k === "pe" && isStock() && !e.rel && S.sector && !e.underSec) txt += " Above its sector median.";
     if (t.k === "peg" && r.pegs === "calc") txt += " Calculated from trailing growth.";
     return txt;
   }
@@ -631,7 +716,8 @@ ${topbar()}
     $("o-trend").addEventListener("change", e => { S.trendOn = e.target.checked; save(); syncInputs(); renderAll(); });
     $("o-zmode").addEventListener("change", e => { S.zmode = e.target.value; save(); syncInputs(); renderAll(); });
     if (isStock()) {
-      num("o-mcap", "mcap"); num("o-mcapmax", "mcapMax");
+      num("o-mcap", "mcap"); num("o-mcapmax", "mcapMax"); num("o-sectop", "secTop");
+      $("o-secon").addEventListener("change", e => { S.secOn = e.target.checked; syncInputs(); renderAll(); });
       if ($("o-uni")) $("o-uni").addEventListener("change", e => { S.uni = e.target.value; shown = 60; renderAll(); }); num("o-disc", "disc"); num("o-term", "term"); num("o-gcap", "gcap");
       if ($("o-sector")) $("o-sector").addEventListener("change", e => { S.sector = e.target.checked; save(); renderAll(); });
       $("o-fin").addEventListener("change", e => { S.fin = e.target.checked; save(); renderAll(); });
@@ -801,6 +887,7 @@ ${topbar()}
     }));
     const e = withPage(homePid, d, () => ({ ...evaluate(r), _med: kind === "stock" ? (d.medians[r.sec] ?? d.medians._market) : null, _zmode: S.zmode, _pull: S.pull, _pullMax: S.pullMax, _low: S.low, _zoneOn: S.zoneOn }));
     const [good, bad] = strengthsWeaknesses(e, kind);
+    const vsSector = kind === "stock" ? withPage(homePid, d, () => sectorTableHTML(e)) : "";
 
     const best = results.slice().sort((a, b) => b.passes / b.N - a.passes / a.N)[0];
     const fit = results.filter(x => x.passes === x.N && !x.excl.length);
@@ -846,6 +933,7 @@ ${topbar()}
         <div class="an-col good"><h3>Strengths</h3>${good.length ? `<ul>${good.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p class="muted">None stand out.</p>`}</div>
         <div class="an-col weak"><h3>Weaknesses</h3>${bad.length ? `<ul>${bad.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p class="muted">None stand out.</p>`}</div>
       </div>
+      ${vsSector}
       <h3 class="an-sub">How it scores on your screens</h3>
       <p class="muted an-note">${pids.includes(PID) ? `${esc(CFG.pages[PID].nav)} uses your current settings on this page; the others use their default settings.` : "Scored with each screen's default settings."}</p>
       <div class="an-pages">${pageCards}</div>
