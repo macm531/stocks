@@ -430,3 +430,5 @@ table.sectab td.bad { color: var(--fail); }
 .mrow { grid-template-columns: minmax(150px, 1fr) 120px minmax(240px, 1.5fr) minmax(0, 1.8fr) 110px; }
 
 .okmsg { margin: 0; padding: 10px 14px; border-radius: 10px; background: var(--pass-soft); color: var(--pass); font-weight: 600; }
+
+.tskip { flex-basis: 100%; font-family: var(--f-body); font-size: 11.5px; color: var(--muted); }

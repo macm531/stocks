@@ -1422,11 +1422,26 @@ ${topbar()}
     try { L = (await getJSON("live.json", true)).q || {}; } catch (e) {}
     const now = t => (L[t] && L[t][0]) || T.last[t];
     const spyNow = now("SPY");
+    // Re-buy rule: a stock already picked in an earlier week (same screen and basket) only counts
+    // again when it's cheaper than the first time it was picked. Raw snapshots keep every pick.
+    const firstPx = {};
+    const kept = new Map();
+    for (const s of T.snaps.slice().sort((a, b) => a.d.localeCompare(b.d))) {
+      const key = s.page + "|" + (s.b || "full"), first = (firstPx[key] = firstPx[key] || {});
+      const keep = [], skip = [];
+      for (const [t, p] of s.picks) {
+        if (first[t] == null) { first[t] = p; keep.push([t, p]); }
+        else if (p < first[t]) keep.push([t, p]);
+        else skip.push({ t, p, first: first[t] });
+      }
+      kept.set(s, { keep, skip });
+    }
     const all = T.snaps.map(s => {
-      const rets = s.picks.map(([t, p]) => ({ t, p, now: now(t), ret: now(t) ? now(t) / p - 1 : null })).filter(x => x.ret != null);
+      const { keep, skip } = kept.get(s);
+      const rets = keep.map(([t, p]) => ({ t, p, now: now(t), ret: now(t) ? now(t) / p - 1 : null })).filter(x => x.ret != null);
       const avg = rets.length ? rets.reduce((a, x) => a + x.ret, 0) / rets.length : null;
       const spy = spyNow && s.spy ? spyNow / s.spy - 1 : null;
-      return { ...s, b: s.b || "full", rets, avg, spy, ex: avg != null && spy != null ? avg - spy : null };
+      return { ...s, b: s.b || "full", keep, skip, rets, avg, spy, ex: avg != null && spy != null ? avg - spy : null };
     });
     const snaps = all.filter(s => s.b === basket);
     const first = snaps.length ? snaps[0].d : null;
@@ -1473,9 +1488,11 @@ ${topbar()}
         return `<section class="block"><h2>${esc(p.nav)}</h2><div class="tablebox"><table class="ttab">
           <thead><tr><th>Picked on</th><th class="r">Picks</th><th class="r">Picks since</th><th class="r">SPY since</th><th class="r">Difference</th><th>Picks</th></tr></thead>
           <tbody>${ss.map(s => `<tr>
-            <td>${esc(s.d)}</td><td class="n">${s.picks.length}</td><td class="n">${sign(s.avg)}</td><td class="n">${sign(s.spy)}</td>
+            <td>${esc(s.d)}</td><td class="n">${s.keep.length}${s.skip.length ? `<small class="muted"> +${s.skip.length} skipped</small>` : ""}</td><td class="n">${sign(s.avg)}</td><td class="n">${sign(s.spy)}</td>
             <td class="n ${s.ex > 0 ? "ok" : s.ex < 0 ? "bad" : ""}">${sign(s.ex)}</td>
-            <td class="tpicks">${s.rets.length ? s.rets.sort((a, b) => b.ret - a.ret).map(x => `<span data-analyze="${esc(x.t)}" class="${x.ret >= 0 ? "ok" : "bad"}">${esc(x.t)} ${sign(x.ret)}</span>`).join("") : `<span class="muted">${BASKET[basket].empty}</span>`}</td></tr>`).join("")}
+            <td class="tpicks">${s.rets.length ? s.rets.sort((a, b) => b.ret - a.ret).map(x => `<span data-analyze="${esc(x.t)}" class="${x.ret >= 0 ? "ok" : "bad"}">${esc(x.t)} ${sign(x.ret)}</span>`).join("")
+              : `<span class="muted">${s.skip.length ? "No new buys: every pick was a repeat above its first price" : BASKET[basket].empty}</span>`}
+              ${s.skip.length ? `<span class="tskip" title="Already picked earlier at a lower price, so not bought again">Not re-bought (above first price): ${s.skip.map(x => `${esc(x.t)} $${fx(x.p)} vs $${fx(x.first)}`).join(", ")}</span>` : ""}</td></tr>`).join("")}
           </tbody></table></div></section>`;
       }).join("")}
       <section class="notes">
@@ -1483,6 +1500,7 @@ ${topbar()}
           ? "Every week each screen's full matches (default settings, every test passed) are recorded with that day's price."
           : "Every week each screen's buy-zone list (default settings: all tests but at most one passed, and in that screen's buy zone that day) is recorded with that day's price."}
           "Picks since" is their equal-weight average price change from then to now; "SPY since" is the S&amp;P 500 ETF over the same span.</p></div>
+        <div><h3>No buying the same stock higher</h3><p>A stock that was already picked in an earlier week only counts as a new buy when its price is lower than the first time it was picked. Repeats at a higher price are listed as "not re-bought" and left out of that week's results.</p></div>
         <div><h3>Why forward, not a backtest</h3><p>Free data only shows companies as they look today, so testing the screen on past years would quietly use information nobody had then. Recording picks as they happen can't cheat that way.</p></div>
         <div><h3>What's left out</h3><p>Prices only: dividends, trading costs and taxes aren't counted, for the picks or SPY. Stocks that drop out of the scan keep their last recorded price.</p></div>
       </section>`;
